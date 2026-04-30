@@ -10,6 +10,7 @@ from cv_bridge import CvBridge
 from geometry_msgs.msg import PointStamped
 from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image
+from std_srvs.srv import Trigger
 
 
 @dataclass

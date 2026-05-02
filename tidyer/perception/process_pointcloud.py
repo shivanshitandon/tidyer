@@ -7,10 +7,13 @@ import cv2
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
-from geometry_msgs.msg import PointStamped
+from geometry_msgs.msg import Pose, PoseArray, PointStamped
 from rclpy.node import Node
+from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import CameraInfo, Image
 from std_srvs.srv import Trigger
+from tf2_geometry_msgs import do_transform_point
+from tf2_ros import Buffer, TransformException, TransformListener
 
 
 @dataclass
@@ -21,6 +24,7 @@ class Detection2D3D:
     bbox_xywh: Tuple[int, int, int, int]
     area_px: float
     xyz_cam: Optional[Tuple[float, float, float]]
+    yaw_rad: float
 
 
 @dataclass
@@ -31,21 +35,31 @@ class BlockState:
     centroid_uv: Tuple[int, int]
     xyz_cam: Optional[Tuple[float, float, float]]
     area_px: float
+    yaw_rad: float
     last_seen_s: float
 
 
 class TidyerPerceptionNode(Node):
-    """OpenCV-based perception pipeline for target/current scene differencing."""
+    """OpenCV-based perception pipeline.
+
+    Captures triggered by services:
+      /capture_reference  : snapshot the current frame as the target scene
+      /capture_current    : snapshot, find the biggest moved block, publish
+                            (pick, place) on /pick_place_pair as PoseArray
+                            in base_link.
+    """
+
+    BASE_FRAME = 'base_link'
 
     def __init__(self) -> None:
         super().__init__('tidyer_perception')
         self.bridge = CvBridge()
-        self.pub_pose = self.create_publisher(PointStamped, '/cube_pose', 10)
+        self.pub_pair = self.create_publisher(PoseArray, '/pick_place_pair', 10)
 
         self.declare_parameter('rgb_topic', '/camera/camera/color/image_raw')
         self.declare_parameter('depth_topic', '/camera/camera/aligned_depth_to_color/image_raw')
         self.declare_parameter('camera_info_topic', '/camera/camera/aligned_depth_to_color/camera_info')
-        self.declare_parameter('reference_image_path', '')
+        self.declare_parameter('camera_optical_frame', 'camera_color_optical_frame')
         self.declare_parameter('min_contour_area_px', 800.0)
         self.declare_parameter('position_tolerance_px', 50.0)
         self.declare_parameter('desk_lower_half_only', True)
@@ -71,7 +85,7 @@ class TidyerPerceptionNode(Node):
         self.rgb_topic = self.get_parameter('rgb_topic').value
         self.depth_topic = self.get_parameter('depth_topic').value
         self.camera_info_topic = self.get_parameter('camera_info_topic').value
-        self.reference_image_path = self.get_parameter('reference_image_path').value
+        self.camera_optical_frame = self.get_parameter('camera_optical_frame').value
         self.min_contour_area_px = float(self.get_parameter('min_contour_area_px').value)
         self.position_tolerance_px = float(self.get_parameter('position_tolerance_px').value)
         self.desk_lower_half_only = bool(self.get_parameter('desk_lower_half_only').value)
@@ -88,17 +102,26 @@ class TidyerPerceptionNode(Node):
         self.cy: Optional[float] = None
         self.latest_rgb: Optional[np.ndarray] = None
         self.latest_depth: Optional[np.ndarray] = None
-        self.reference_bgr: Optional[np.ndarray] = self._load_reference_image()
         self.reference_detections: List[Detection2D3D] = []
         self.block_states: Dict[str, BlockState] = {}
         self.next_track_id: int = 1
 
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
         self.create_subscription(CameraInfo, self.camera_info_topic, self._camera_info_cb, 10)
         self.create_subscription(Image, self.rgb_topic, self._rgb_cb, 10)
         self.create_subscription(Image, self.depth_topic, self._depth_cb, 10)
-        self.create_timer(0.5, self._process_tick)
 
-        self.get_logger().info('Tidyer perception ready (OpenCV segmentation; no VLM/YOLO).')
+        self.create_service(Trigger, '/capture_reference', self._on_capture_reference)
+        self.create_service(Trigger, '/capture_current', self._on_capture_current)
+
+        # Background tracker for state snapshot/debug; does not publish goals.
+        self.create_timer(0.5, self._tracker_tick)
+
+        self.get_logger().info(
+            'Tidyer perception ready. Trigger /capture_reference then /capture_current.'
+        )
 
     def _load_hsv_ranges(self) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
         raw = self.get_parameter('hsv_ranges_json').value
@@ -108,21 +131,6 @@ class TidyerPerceptionNode(Node):
             lo, hi = bounds
             ranges[label] = (np.array(lo, dtype=np.uint8), np.array(hi, dtype=np.uint8))
         return ranges
-
-    def _load_reference_image(self) -> Optional[np.ndarray]:
-        if not self.reference_image_path:
-            self.get_logger().warn('No reference image configured. Set reference_image_path parameter.')
-            return None
-        ref_path = Path(self.reference_image_path)
-        if not ref_path.exists():
-            self.get_logger().warn(f'Reference image not found: {ref_path}')
-            return None
-        img = cv2.imread(str(ref_path), cv2.IMREAD_COLOR)
-        if img is None:
-            self.get_logger().warn(f'Failed to decode reference image: {ref_path}')
-            return None
-        self.get_logger().info(f'Loaded reference image: {ref_path}')
-        return img
 
     def _camera_info_cb(self, msg: CameraInfo) -> None:
         self.fx = msg.k[0]
@@ -136,31 +144,77 @@ class TidyerPerceptionNode(Node):
     def _depth_cb(self, msg: Image) -> None:
         self.latest_depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
 
-    def _process_tick(self) -> None:
+    def _tracker_tick(self) -> None:
         if self.latest_rgb is None:
             return
-        if self.reference_bgr is None:
-            return
+        detections = self._segment_objects(self.latest_rgb, self.latest_depth)
+        self._update_block_states(detections)
+        self._write_state_snapshot()
+
+    def _on_capture_reference(self, request, response):
+        if self.latest_rgb is None:
+            response.success = False
+            response.message = 'No RGB frame yet.'
+            return response
+        self.reference_detections = self._segment_objects(self.latest_rgb, self.latest_depth)
+        response.success = True
+        response.message = f'Captured {len(self.reference_detections)} reference objects.'
+        self.get_logger().info(response.message)
+        return response
+
+    def _on_capture_current(self, request, response):
+        if self.latest_rgb is None:
+            response.success = False
+            response.message = 'No RGB frame yet.'
+            return response
+        if not self.reference_detections:
+            response.success = False
+            response.message = 'No reference captured. Call /capture_reference first.'
+            return response
 
         current = self._segment_objects(self.latest_rgb, self.latest_depth)
-        self._update_block_states(current)
-        self._write_state_snapshot()
-        if not self.reference_detections:
-            self.reference_detections = self._segment_objects(self.reference_bgr, None)
-            self.get_logger().info(f'Initialized {len(self.reference_detections)} reference objects.')
-
         moved = self._find_moved_objects(current, self.reference_detections)
         if not moved:
-            self.get_logger().info('Scene aligned with reference (within tolerance).')
-            return
+            response.success = True
+            response.message = 'Scene aligned with reference (no moved blocks).'
+            self.get_logger().info(response.message)
+            return response
 
-        # Prioritize biggest changed object first.
-        moved.sort(key=lambda x: x.area_px, reverse=True)
-        next_obj = moved[0]
-        if next_obj.xyz_cam is None:
-            self.get_logger().warn(f'No valid depth for "{next_obj.label}" detection.')
-            return
-        self._publish_point(next_obj)
+        # Biggest moved block first.
+        moved.sort(key=lambda d: d.area_px, reverse=True)
+        pick = moved[0]
+        place = self._matching_reference(pick, self.reference_detections)
+        if place is None:
+            response.success = False
+            response.message = f'No matching reference slot for moved {pick.label}/{pick.shape}.'
+            return response
+        if pick.xyz_cam is None or place.xyz_cam is None:
+            response.success = False
+            response.message = 'Missing depth for pick or place point.'
+            return response
+
+        try:
+            pick_base = self._camera_point_to_base(pick.xyz_cam)
+            place_base = self._camera_point_to_base(place.xyz_cam)
+        except TransformException as exc:
+            response.success = False
+            response.message = f'TF failed: {exc}'
+            return response
+
+        msg = PoseArray()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self.BASE_FRAME
+        msg.poses.append(self._make_pose(pick_base, pick.yaw_rad))
+        msg.poses.append(self._make_pose(place_base, place.yaw_rad))
+        self.pub_pair.publish(msg)
+
+        response.success = True
+        response.message = (
+            f'Published pick {pick.label}/{pick.shape} -> place '
+            f'(pick={pick_base}, place={place_base}, yaw={pick.yaw_rad:.2f})'
+        )
+        self.get_logger().info(response.message)
+        return response
 
     def _segment_objects(self, bgr: np.ndarray, depth: Optional[np.ndarray]) -> List[Detection2D3D]:
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
@@ -182,8 +236,9 @@ class TidyerPerceptionNode(Node):
                 x, y, w, h = cv2.boundingRect(contour)
                 u = int(x + w / 2)
                 v = int(y + h / 2)
-                xyz = self._pixel_to_camera_xyz(u, v, depth)
+                xyz = self._block_top_xyz_camera(contour, u, v, depth)
                 shape = self._classify_shape(contour, w, h, area)
+                yaw = self._grasp_yaw(contour)
                 detections.append(
                     Detection2D3D(
                         label=label,
@@ -192,6 +247,7 @@ class TidyerPerceptionNode(Node):
                         bbox_xywh=(x, y, w, h),
                         area_px=area,
                         xyz_cam=xyz,
+                        yaw_rad=yaw,
                     )
                 )
         return detections
@@ -246,26 +302,85 @@ class TidyerPerceptionNode(Node):
             return 'polygon'
         return 'unknown'
 
-    def _pixel_to_camera_xyz(
-        self, u: int, v: int, depth_img: Optional[np.ndarray]
+    def _grasp_yaw(self, contour: np.ndarray) -> float:
+        # Top-down grasp: align gripper opening across the SHORT side of the
+        # min-area rect (so fingers squeeze the long sides).
+        if len(contour) < 5:
+            return 0.0
+        (_, _), (w, h), angle_deg = cv2.minAreaRect(contour)
+        long_angle_deg = angle_deg + 90.0 if w < h else angle_deg
+        yaw_deg = long_angle_deg - 90.0
+        return float(np.deg2rad(yaw_deg))
+
+    def _block_top_xyz_camera(
+        self, contour: np.ndarray, u: int, v: int, depth_img: Optional[np.ndarray]
     ) -> Optional[Tuple[float, float, float]]:
         if depth_img is None or self.fx is None or self.fy is None or self.cx is None or self.cy is None:
             return None
         if v < 0 or u < 0 or v >= depth_img.shape[0] or u >= depth_img.shape[1]:
             return None
 
-        depth_patch = depth_img[max(v - 2, 0) : v + 3, max(u - 2, 0) : u + 3]
-        valid = depth_patch[depth_patch > 0]
-        if valid.size == 0:
+        # Sample depth inside the contour to avoid pulling in desk pixels.
+        mask = np.zeros(depth_img.shape[:2], dtype=np.uint8)
+        cv2.drawContours(mask, [contour], -1, 255, thickness=-1)
+        # Erode to stay clear of edges.
+        mask = cv2.erode(mask, np.ones((5, 5), np.uint8), iterations=1)
+        depth_vals = depth_img[mask > 0]
+        depth_vals = depth_vals[depth_vals > 0]
+        if depth_vals.size == 0:
             return None
 
-        # Realsense depth image is usually uint16 in millimeters.
-        z_m = float(np.median(valid))
-        if depth_img.dtype == np.uint16:
-            z_m = z_m / 1000.0
+        # Block top is the *closest* (smallest depth) plateau inside the contour.
+        z_raw = float(np.percentile(depth_vals, 20))
+        z_m = z_raw / 1000.0 if depth_img.dtype == np.uint16 else z_raw
         x_m = (u - self.cx) * z_m / self.fx
         y_m = (v - self.cy) * z_m / self.fy
         return (x_m, y_m, z_m)
+
+    def _camera_point_to_base(self, xyz_cam: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        pt = PointStamped()
+        pt.header.stamp = rclpy.time.Time().to_msg()  # latest available
+        pt.header.frame_id = self.camera_optical_frame
+        pt.point.x = float(xyz_cam[0])
+        pt.point.y = float(xyz_cam[1])
+        pt.point.z = float(xyz_cam[2])
+        tf = self.tf_buffer.lookup_transform(
+            self.BASE_FRAME, self.camera_optical_frame, rclpy.time.Time()
+        )
+        out = do_transform_point(pt, tf)
+        return (out.point.x, out.point.y, out.point.z)
+
+    def _make_pose(self, xyz_base: Tuple[float, float, float], yaw_rad: float) -> Pose:
+        # Top-down EE: 180 deg about X (flips down), then yaw about world Z.
+        rot = R.from_euler('xyz', [np.pi, 0.0, yaw_rad])
+        qx, qy, qz, qw = rot.as_quat()
+        pose = Pose()
+        pose.position.x = float(xyz_base[0])
+        pose.position.y = float(xyz_base[1])
+        pose.position.z = float(xyz_base[2])
+        pose.orientation.x = float(qx)
+        pose.orientation.y = float(qy)
+        pose.orientation.z = float(qz)
+        pose.orientation.w = float(qw)
+        return pose
+
+    def _matching_reference(
+        self, pick: Detection2D3D, reference: List[Detection2D3D]
+    ) -> Optional[Detection2D3D]:
+        # Pair the moved block with the reference slot of same label/shape that
+        # is FURTHEST from the pick centroid (i.e. the empty target slot).
+        best = None
+        best_dist = -1.0
+        for ref in reference:
+            if ref.label != pick.label or ref.shape != pick.shape:
+                continue
+            du = ref.centroid_uv[0] - pick.centroid_uv[0]
+            dv = ref.centroid_uv[1] - pick.centroid_uv[1]
+            dist = float(np.hypot(du, dv))
+            if dist > best_dist:
+                best_dist = dist
+                best = ref
+        return best
 
     def _find_moved_objects(
         self, current: List[Detection2D3D], reference: List[Detection2D3D]
@@ -323,6 +438,7 @@ class TidyerPerceptionNode(Node):
                     centroid_uv=det.centroid_uv,
                     xyz_cam=xyz,
                     area_px=det.area_px,
+                    yaw_rad=det.yaw_rad,
                     last_seen_s=now_s,
                 )
                 unassigned.remove(best_id)
@@ -337,10 +453,10 @@ class TidyerPerceptionNode(Node):
                 centroid_uv=det.centroid_uv,
                 xyz_cam=det.xyz_cam,
                 area_px=det.area_px,
+                yaw_rad=det.yaw_rad,
                 last_seen_s=now_s,
             )
 
-        # Keep recently-seen tracks to improve ID continuity through short occlusions.
         for block_id in unassigned:
             prev = self.block_states[block_id]
             if now_s - prev.last_seen_s <= 2.0:
@@ -364,6 +480,7 @@ class TidyerPerceptionNode(Node):
                     'centroid_uv': [int(block.centroid_uv[0]), int(block.centroid_uv[1])],
                     'xyz_cam_m': list(block.xyz_cam) if block.xyz_cam is not None else None,
                     'area_px': float(block.area_px),
+                    'yaw_rad': float(block.yaw_rad),
                     'last_seen_s': float(block.last_seen_s),
                 }
             )
@@ -397,19 +514,6 @@ class TidyerPerceptionNode(Node):
         out_path = Path(self.state_output_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(snapshot, indent=2))
-
-    def _publish_point(self, detection: Detection2D3D) -> None:
-        pt = PointStamped()
-        pt.header.stamp = self.get_clock().now().to_msg()
-        pt.header.frame_id = 'camera_color_optical_frame'
-        pt.point.x = detection.xyz_cam[0]
-        pt.point.y = detection.xyz_cam[1]
-        pt.point.z = detection.xyz_cam[2]
-        self.pub_pose.publish(pt)
-        self.get_logger().info(
-            f'Publish move target "{detection.label}" at xyz='
-            f'({pt.point.x:.3f}, {pt.point.y:.3f}, {pt.point.z:.3f})'
-        )
 
 
 def main(args=None):

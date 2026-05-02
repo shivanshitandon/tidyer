@@ -20,6 +20,7 @@ setup(
             'tidyer_tf = tidyer.planning.static_tf_transform:main',
             'tidyer_pick_place = tidyer.planning.main:main',
             'tidyer_ik = tidyer.planning.ik:main',
+            'tidyer_keyboard = tidyer.planning.keyboard_trigger:main',
         ],
     },
 )

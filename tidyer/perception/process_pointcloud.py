@@ -142,6 +142,10 @@ class TidyerPerceptionNode(Node):
         self.latest_rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
     def _depth_cb(self, msg: Image) -> None:
+        depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+        if depth is None: 
+            print("Received empty depth image.")
+            return
         self.latest_depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
 
     def _tracker_tick(self) -> None:
@@ -188,9 +192,13 @@ class TidyerPerceptionNode(Node):
             response.success = False
             response.message = f'No matching reference slot for moved {pick.label}/{pick.shape}.'
             return response
-        if pick.xyz_cam is None or place.xyz_cam is None:
+        if pick.xyz_cam is None:
             response.success = False
-            response.message = 'Missing depth for pick or place point.'
+            response.message = 'Missing depth for pick point.'
+            return response
+        if place.xyz_cam is None:
+            response.success = False
+            response.message = 'Missing depth for place point.'
             return response
 
         try:
@@ -315,9 +323,14 @@ class TidyerPerceptionNode(Node):
     def _block_top_xyz_camera(
         self, contour: np.ndarray, u: int, v: int, depth_img: Optional[np.ndarray]
     ) -> Optional[Tuple[float, float, float]]:
-        if depth_img is None or self.fx is None or self.fy is None or self.cx is None or self.cy is None:
+        if depth_img is None:
+            print("No depth image, cannot compute 3D position.")
+            return None
+        if self.fx is None or self.fy is None or self.cx is None or self.cy is None: 
+            print("Camera intrinsics not set, cannot compute 3D position.")
             return None
         if v < 0 or u < 0 or v >= depth_img.shape[0] or u >= depth_img.shape[1]:
+            print("Invalid pixel coordinates, cannot compute 3D position.")
             return None
 
         # Sample depth inside the contour to avoid pulling in desk pixels.
@@ -328,6 +341,7 @@ class TidyerPerceptionNode(Node):
         depth_vals = depth_img[mask > 0]
         depth_vals = depth_vals[depth_vals > 0]
         if depth_vals.size == 0:
+            print("No valid depth pixels in contour, cannot compute 3D position.")
             return None
 
         # Block top is the *closest* (smallest depth) plateau inside the contour.

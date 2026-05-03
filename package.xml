@@ -4,7 +4,7 @@
   <name>tidyer</name>
   <version>0.0.0</version>
   <description>106A final project skeleton</description>
-  <maintainer email="todo@todo">todo</maintainer>
+  <maintainer email="todo@example.com">todo</maintainer>
   <license>TODO</license>
 
   <buildtool_depend>ament_python</buildtool_depend>

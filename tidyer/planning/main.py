@@ -24,6 +24,15 @@ UR_JOINT_NAMES = [
     'wrist_2_joint',
     'wrist_3_joint',
 ]
+# Ordered to match UR_JOINT_NAMES (pan, lift, elbow, w1, w2, w3).
+DEFAULT_JOINTS = [
+    4.751084327697754,
+    -1.2080865663341065,
+    -2.2311320304870605,
+    -1.255601243381836,
+    1.5683932304382324,
+    -3.1400280634509485,
+]
 
 
 @dataclass
@@ -72,6 +81,15 @@ class UR7e_CubeGrasp(Node):
 
         self.job_queue: List[Job] = []
         self.busy: bool = False
+
+        self._startup_timer = self.create_timer(0.1, self._startup_move)
+
+    def _startup_move(self) -> None:
+        self._startup_timer.cancel()
+        self.get_logger().info('Moving to default joint position at startup.')
+        self.job_queue.append(JointGoal(DEFAULT_JOINTS))
+        self.busy = True
+        self.execute_jobs()
 
     def joint_state_callback(self, msg: JointState) -> None:
         self.joint_state = msg

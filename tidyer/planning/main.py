@@ -176,17 +176,32 @@ class UR7e_CubeGrasp(Node):
 
     def _toggle_gripper(self) -> None:
         if not self.gripper_cli.wait_for_service(timeout_sec=5.0):
-            self.get_logger().error('Gripper service not available')
+            self.get_logger().error(
+                'Gripper service /toggle_gripper not available; aborting cycle.'
+            )
+            self.job_queue.clear()
             self.busy = False
             return
         future = self.gripper_cli.call_async(Trigger.Request())
         rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        if not future.done():
+            self.get_logger().error('Gripper service call timed out; aborting cycle.')
+            self.job_queue.clear()
+            self.busy = False
+            return
         self.get_logger().info('Gripper toggled.')
         self.execute_jobs()
 
     def _execute_joint_trajectory(self, joint_traj: JointTrajectory) -> None:
         self.get_logger().info('Waiting for controller action server...')
-        self.exec_ac.wait_for_server()
+        if not self.exec_ac.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error(
+                'Controller action server /scaled_joint_trajectory_controller/'
+                'follow_joint_trajectory not available; is the UR driver running?'
+            )
+            self.job_queue.clear()
+            self.busy = False
+            return
 
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = joint_traj
@@ -195,9 +210,16 @@ class UR7e_CubeGrasp(Node):
         send_future.add_done_callback(self._on_goal_sent)
 
     def _on_goal_sent(self, future) -> None:
-        goal_handle = future.result()
-        if not goal_handle.accepted:
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            self.get_logger().error(f'send_goal failed: {exc}')
+            self.job_queue.clear()
+            self.busy = False
+            return
+        if goal_handle is None or not goal_handle.accepted:
             self.get_logger().error('Trajectory goal rejected.')
+            self.job_queue.clear()
             self.busy = False
             return
         self.get_logger().info('Executing trajectory...')
@@ -211,6 +233,7 @@ class UR7e_CubeGrasp(Node):
             self.execute_jobs()
         except Exception as exc:
             self.get_logger().error(f'Trajectory execution failed: {exc}')
+            self.job_queue.clear()
             self.busy = False
 
 

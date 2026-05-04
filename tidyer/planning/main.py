@@ -13,9 +13,6 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from tidyer.planning.ik import IKPlanner
 
-
-# TODO: confirm these joint values match what `ros2 run ur7e_utils tuck` commands.
-OBSERVATION_JOINTS = [0.0, -1.57, 1.57, -1.57, -1.57, 0.0]
 UR_JOINT_NAMES = [
     'shoulder_pan_joint',
     'shoulder_lift_joint',
@@ -122,7 +119,7 @@ class UR7e_CubeGrasp(Node):
             PoseGoal(place_pose),
             GripGoal(),
             PoseGoal(pre_place),
-            JointGoal(OBSERVATION_JOINTS),
+            JointGoal(DEFAULT_JOINTS),
         ]
         self.busy = True
         self.execute_jobs()

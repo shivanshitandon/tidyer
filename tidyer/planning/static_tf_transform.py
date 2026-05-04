@@ -10,7 +10,7 @@ def main():
     br = StaticTransformBroadcaster(node)
     t = TransformStamped()
     t.header.frame_id = 'wrist_3_link'
-    t.child_frame_id = 'camera_link'
+    t.child_frame_id = 'camera_link' # Look at the URDF to see how the camera is attached to the robot
     t.transform.translation.x = -0.025
     t.transform.translation.y = 0.13
     t.transform.translation.z = 0.0

@@ -74,9 +74,11 @@ class TidyerPerceptionNode(Node):
             'hsv_ranges_json',
             json.dumps(
                 {
-                    'red': [[0, 100, 70], [12, 255, 255]],
+                    # 0 93 93 
+                    # 28 103
+                    # 'red': [[0, 100, 70], [12, 255, 255]],
                     'blue': [[90, 80, 50], [130, 255, 255]],
-                    'green': [[35, 70, 50], [85, 255, 255]],
+                    'green': [[60, 120, 60], [95, 255, 200]],
                     'yellow': [[18, 80, 80], [35, 255, 255]],
                 }
             ),
@@ -242,6 +244,9 @@ class TidyerPerceptionNode(Node):
                 if area < self.min_contour_area_px:
                     continue
                 x, y, w, h = cv2.boundingRect(contour)
+                cv2.drawContours(bgr, [contour], -1, (0, 255, 255), 2)
+                cv2.imshow('Segmentation', bgr)
+                cv2.waitKey(1)
                 u = int(x + w / 2)
                 v = int(y + h / 2)
                 xyz = self._block_top_xyz_camera(contour, u, v, depth)
@@ -258,6 +263,8 @@ class TidyerPerceptionNode(Node):
                         yaw_rad=yaw,
                     )
                 )
+        cv2.imshow('Detections', bgr)
+        cv2.waitKey(1)
         return detections
 
     def _compute_desk_block_mask(self, depth_img: Optional[np.ndarray]) -> Optional[np.ndarray]:

@@ -1,4 +1,5 @@
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -102,8 +103,14 @@ class TidyerPerceptionNode(Node):
         self.latest_rgb: Optional[np.ndarray] = None
         self.latest_depth: Optional[np.ndarray] = None
         self.reference_detections: List[Detection2D3D] = []
+        self.reference_image: Optional[np.ndarray] = None
         self.block_states: Dict[str, BlockState] = {}
         self.next_track_id: int = 1
+
+        self.ref_dir = Path.home() / 'final_proj' / 'ref'
+        self.curr_dir = Path.home() / 'final_proj' / 'curr'
+        self.ref_dir.mkdir(parents=True, exist_ok=True)
+        self.curr_dir.mkdir(parents=True, exist_ok=True)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -141,10 +148,6 @@ class TidyerPerceptionNode(Node):
         self.latest_rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
     def _depth_cb(self, msg: Image) -> None:
-        depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-        if depth is None: 
-            print("Received empty depth image.")
-            return
         self.latest_depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
 
     def _tracker_tick(self) -> None:
@@ -159,7 +162,12 @@ class TidyerPerceptionNode(Node):
             response.success = False
             response.message = 'No RGB frame yet.'
             return response
-        self.reference_detections = self._segment_objects(self.latest_rgb, self.latest_depth)
+        rgb_snap = self.latest_rgb.copy()
+        depth_snap = self.latest_depth
+        self.reference_image = rgb_snap
+        self.reference_detections = self._segment_objects(rgb_snap, depth_snap)
+        ts = time.strftime('%Y%m%d_%H%M%S')
+        cv2.imwrite(str(self.ref_dir / f'ref_{ts}.png'), rgb_snap)
         response.success = True
         response.message = f'Captured {len(self.reference_detections)} reference objects.'
         self.get_logger().info(response.message)
@@ -175,7 +183,12 @@ class TidyerPerceptionNode(Node):
             response.message = 'No reference captured. Call /capture_reference first.'
             return response
 
-        current = self._segment_objects(self.latest_rgb, self.latest_depth)
+        rgb_snap = self.latest_rgb.copy()
+        depth_snap = self.latest_depth
+        ts = time.strftime('%Y%m%d_%H%M%S')
+        cv2.imwrite(str(self.curr_dir / f'curr_{ts}.png'), rgb_snap)
+
+        current = self._segment_objects(rgb_snap, depth_snap)
         moved = self._find_moved_objects(current, self.reference_detections)
         if not moved:
             response.success = True
@@ -210,6 +223,22 @@ class TidyerPerceptionNode(Node):
         msg.poses.append(self._make_pose(pick_base, pick.yaw_rad))
         msg.poses.append(self._make_pose(place_base, place.yaw_rad))
         self.pub_pair.publish(msg)
+
+        pick_uv = pick.centroid_uv
+        pick_vis = rgb_snap.copy()
+        cv2.circle(pick_vis, pick_uv, 12, (0, 0, 255), 2)
+        cv2.circle(pick_vis, pick_uv, 3, (0, 0, 255), -1)
+        cv2.putText(pick_vis, 'PICK', (pick_uv[0] + 14, pick_uv[1] + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.imwrite(str(self.curr_dir / f'curr_pick_{ts}.png'), pick_vis)
+
+        place_uv = place.centroid_uv
+        place_vis = self.reference_image.copy()
+        cv2.circle(place_vis, place_uv, 12, (0, 255, 0), 2)
+        cv2.circle(place_vis, place_uv, 3, (0, 255, 0), -1)
+        cv2.putText(place_vis, 'PLACE', (place_uv[0] + 14, place_uv[1] + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.imwrite(str(self.ref_dir / f'ref_place_{ts}.png'), place_vis)
 
         response.success = True
         response.message = (

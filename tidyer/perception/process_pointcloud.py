@@ -21,7 +21,6 @@ class Detection2D3D:
     label: str
     shape: str
     centroid_uv: Tuple[int, int]
-    bbox_xywh: Tuple[int, int, int, int]
     area_px: float
     xyz_cam: Optional[Tuple[float, float, float]]
     yaw_rad: float
@@ -243,21 +242,33 @@ class TidyerPerceptionNode(Node):
                 area = cv2.contourArea(contour)
                 if area < self.min_contour_area_px:
                     continue
-                x, y, w, h = cv2.boundingRect(contour)
                 cv2.drawContours(bgr, [contour], -1, (0, 255, 255), 2)
                 cv2.imshow('Segmentation', bgr)
                 cv2.waitKey(1)
-                u = int(x + w / 2)
-                v = int(y + h / 2)
+                moments = cv2.moments(contour)
+                if moments['m00'] == 0:
+                    continue
+                u = int(moments['m10'] / moments['m00'])
+                v = int(moments['m01'] / moments['m00'])
+                cv2.circle(bgr, (u, v), 4, (0, 0, 255), -1)
                 xyz = self._block_top_xyz_camera(contour, u, v, depth)
-                shape = self._classify_shape(contour, w, h, area)
+                shape = self._classify_shape(contour, area)
+                cv2.putText(
+                    bgr,
+                    f'{label}:{shape}',
+                    (u + 6, v - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (0, 0, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
                 yaw = self._grasp_yaw(contour)
                 detections.append(
                     Detection2D3D(
                         label=label,
                         shape=shape,
                         centroid_uv=(u, v),
-                        bbox_xywh=(x, y, w, h),
                         area_px=area,
                         xyz_cam=xyz,
                         yaw_rad=yaw,
@@ -296,7 +307,7 @@ class TidyerPerceptionNode(Node):
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
         return mask
 
-    def _classify_shape(self, contour: np.ndarray, w: int, h: int, area: float) -> str:
+    def _classify_shape(self, contour: np.ndarray, area: float) -> str:
         peri = cv2.arcLength(contour, True)
         if peri <= 0:
             return 'unknown'
@@ -306,6 +317,7 @@ class TidyerPerceptionNode(Node):
         if vertices == 3:
             return 'triangle'
         if vertices == 4:
+            (_, _), (w, h), _ = cv2.minAreaRect(contour)
             ratio = (w / float(h)) if h > 0 else 1.0
             if 0.85 <= ratio <= 1.15:
                 return 'square'

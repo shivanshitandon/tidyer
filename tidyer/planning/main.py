@@ -92,6 +92,9 @@ class UR7e_CubeGrasp(Node):
         self.joint_state = msg
 
     def pair_callback(self, msg: PoseArray) -> None:
+        print("RUNNING THE PAIR CALLBACK")
+        self.get_logger().info("RUNNING THE PAIR CALLBACK")
+        self.get_logger().info(f"Busy: {self.busy}")
         if self.busy:
             self.get_logger().info('Pick/place in progress; ignoring new pair.')
             return
@@ -129,7 +132,7 @@ class UR7e_CubeGrasp(Node):
         out = Pose()
         out.position.x = pose.position.x
         out.position.y = pose.position.y
-        out.position.z = pose.position.z + dz
+        out.position.z = pose.position.z - dz
         out.orientation = pose.orientation
         return out
 

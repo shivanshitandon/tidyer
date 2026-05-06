@@ -7,12 +7,12 @@ import cv2
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
-from geometry_msgs.msg import Pose, PoseArray, PointStamped
+from geometry_msgs.msg import Pose, PoseArray, PointStamped, Vector3Stamped
 from rclpy.node import Node
 from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import CameraInfo, Image
 from std_srvs.srv import Trigger
-from tf2_geometry_msgs import do_transform_point
+from tf2_geometry_msgs import do_transform_point, do_transform_vector3
 from tf2_ros import Buffer, TransformException, TransformListener
 
 
@@ -61,8 +61,7 @@ class TidyerPerceptionNode(Node):
         self.declare_parameter('camera_optical_frame', 'camera_color_optical_frame')
         self.declare_parameter('min_contour_area_px', 800.0)
         self.declare_parameter('position_tolerance_px', 50.0)
-        self.declare_parameter('desk_lower_half_only', True)
-        self.declare_parameter('desk_plane_percentile', 70.0)
+        self.declare_parameter('desk_plane_percentile', 50.0)
         self.declare_parameter('block_height_min_m', 0.005)
         self.declare_parameter('block_height_max_m', 0.15)
         self.declare_parameter('track_match_distance_px', 65.0)
@@ -73,7 +72,7 @@ class TidyerPerceptionNode(Node):
             'hsv_ranges_json',
             json.dumps(
                 {
-                    # 0 93 93 
+                    # 0 93 93
                     # 28 103
                     # 'red': [[0, 100, 70], [12, 255, 255]],
                     'blue': [[90, 80, 50], [130, 255, 255]],
@@ -89,7 +88,6 @@ class TidyerPerceptionNode(Node):
         self.camera_optical_frame = self.get_parameter('camera_optical_frame').value
         self.min_contour_area_px = float(self.get_parameter('min_contour_area_px').value)
         self.position_tolerance_px = float(self.get_parameter('position_tolerance_px').value)
-        self.desk_lower_half_only = bool(self.get_parameter('desk_lower_half_only').value)
         self.desk_plane_percentile = float(self.get_parameter('desk_plane_percentile').value)
         self.block_height_min_m = float(self.get_parameter('block_height_min_m').value)
         self.block_height_max_m = float(self.get_parameter('block_height_max_m').value)
@@ -186,13 +184,9 @@ class TidyerPerceptionNode(Node):
             return response
 
         # Biggest moved block first.
-        moved.sort(key=lambda d: d.area_px, reverse=True)
-        pick = moved[0]
-        place = self._matching_reference(pick, self.reference_detections)
-        if place is None:
-            response.success = False
-            response.message = f'No matching reference slot for moved {pick.label}/{pick.shape}.'
-            return response
+        moved.sort(key=lambda d: d[0].area_px, reverse=True)
+        pick = moved[0][0]
+        place = moved[0][1]  # paired reference slot for the moved block
         if pick.xyz_cam is None:
             response.success = False
             response.message = 'Missing depth for pick point.'
@@ -227,7 +221,8 @@ class TidyerPerceptionNode(Node):
 
     def _segment_objects(self, bgr: np.ndarray, depth: Optional[np.ndarray]) -> List[Detection2D3D]:
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        desk_mask = self._compute_desk_block_mask(depth)
+        desk_mask = self._compute_desk_block_mask(depth) #check TODO
+        bgr_vis = bgr.copy()
         detections: List[Detection2D3D] = []
         for label, (lo, hi) in self.hsv_ranges.items():
             mask = cv2.inRange(hsv, lo, hi)
@@ -242,19 +237,19 @@ class TidyerPerceptionNode(Node):
                 area = cv2.contourArea(contour)
                 if area < self.min_contour_area_px:
                     continue
-                cv2.drawContours(bgr, [contour], -1, (0, 255, 255), 2)
-                cv2.imshow('Segmentation', bgr)
+                cv2.drawContours(bgr_vis, [contour], -1, (0, 255, 255), 2)
+                cv2.imshow('Segmentation', bgr_vis)
                 cv2.waitKey(1)
                 moments = cv2.moments(contour)
                 if moments['m00'] == 0:
                     continue
                 u = int(moments['m10'] / moments['m00'])
                 v = int(moments['m01'] / moments['m00'])
-                cv2.circle(bgr, (u, v), 4, (0, 0, 255), -1)
+                cv2.circle(bgr_vis, (u, v), 4, (0, 0, 255), -1)
                 xyz = self._block_top_xyz_camera(contour, u, v, depth)
                 shape = self._classify_shape(contour, area)
                 cv2.putText(
-                    bgr,
+                    bgr_vis,
                     f'{label}:{shape}',
                     (u + 6, v - 6),
                     cv2.FONT_HERSHEY_SIMPLEX,
@@ -263,7 +258,7 @@ class TidyerPerceptionNode(Node):
                     1,
                     cv2.LINE_AA,
                 )
-                yaw = self._grasp_yaw(contour)
+                yaw = self._grasp_yaw(contour, depth)
                 detections.append(
                     Detection2D3D(
                         label=label,
@@ -274,7 +269,7 @@ class TidyerPerceptionNode(Node):
                         yaw_rad=yaw,
                     )
                 )
-        cv2.imshow('Detections', bgr)
+        cv2.imshow('Detections', bgr_vis)
         cv2.waitKey(1)
         return detections
 
@@ -286,11 +281,6 @@ class TidyerPerceptionNode(Node):
             depth_m = depth_m / 1000.0
 
         valid = depth_m > 0.0
-        if self.desk_lower_half_only:
-            lower = np.zeros_like(valid, dtype=bool)
-            lower[depth_m.shape[0] // 2 :, :] = True
-            valid = np.logical_and(valid, lower)
-
         sample = depth_m[valid]
         if sample.size < 200:
             return None
@@ -329,15 +319,85 @@ class TidyerPerceptionNode(Node):
             return 'polygon'
         return 'unknown'
 
-    def _grasp_yaw(self, contour: np.ndarray) -> float:
-        # Top-down grasp: align gripper opening across the SHORT side of the
-        # min-area rect (so fingers squeeze the long sides).
+    def _grasp_yaw(self, contour: np.ndarray, depth_img: Optional[np.ndarray]) -> float:
+        """3D-PCA grasp yaw about base_link Z, in radians.
+
+        Back-projects the block-top pixels through depth, runs PCA in
+        camera_color_optical_frame, transforms the long-axis direction into
+        base_link, and returns the closing-direction yaw (perpendicular to the
+        long axis). Returns 0.0 on any failure or near-symmetric block.
+        """
+        if depth_img is None:
+            return 0.0
+        if self.fx is None or self.fy is None or self.cx is None or self.cy is None:
+            return 0.0
         if len(contour) < 5:
             return 0.0
-        (_, _), (w, h), angle_deg = cv2.minAreaRect(contour)
-        long_angle_deg = angle_deg + 90.0 if w < h else angle_deg
-        yaw_deg = long_angle_deg - 90.0
-        return float(np.deg2rad(yaw_deg))
+
+        mask = np.zeros(depth_img.shape[:2], dtype=np.uint8)
+        cv2.drawContours(mask, [contour], -1, 255, thickness=-1)
+        mask = cv2.erode(mask, np.ones((5, 5), np.uint8), iterations=1)
+
+        ys_px, xs_px = np.where(mask > 0)
+        if ys_px.size < 30:
+            return 0.0
+
+        depth_vals = depth_img[ys_px, xs_px]
+        valid = depth_vals > 0
+        ys_px = ys_px[valid]
+        xs_px = xs_px[valid]
+        depth_vals = depth_vals[valid]
+        if depth_vals.size < 30:
+            return 0.0
+
+        # Restrict to the block-top plateau so PCA isn't biased by sides / desk leaks.
+        is_uint16 = depth_img.dtype == np.uint16
+        z_top_raw = float(np.percentile(depth_vals, 20))
+        band_raw = 5.0 if is_uint16 else 0.005
+        keep = depth_vals.astype(np.float32) <= z_top_raw + band_raw
+        ys_px = ys_px[keep]
+        xs_px = xs_px[keep]
+        depth_vals = depth_vals[keep]
+        if depth_vals.size < 30:
+            return 0.0
+
+        zs_m = depth_vals.astype(np.float32)
+        if is_uint16:
+            zs_m /= 1000.0
+        xs_m = (xs_px.astype(np.float32) - self.cx) * zs_m / self.fx
+        ys_m = (ys_px.astype(np.float32) - self.cy) * zs_m / self.fy
+        pts3 = np.column_stack([xs_m, ys_m, zs_m])
+        pts3 -= pts3.mean(axis=0)
+
+        cov = (pts3.T @ pts3) / max(len(pts3) - 1, 1)
+        try:
+            eigvals, eigvecs = np.linalg.eigh(cov)
+        except np.linalg.LinAlgError:
+            return 0.0
+
+        # Bail on near-symmetric blocks: long axis is ill-defined and yaw flickers.
+        if eigvals[-1] / max(eigvals[-2], 1e-9) < 1.21:
+            return 0.0
+        long_axis_cam = eigvecs[:, -1]
+
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                self.BASE_FRAME, self.camera_optical_frame, rclpy.time.Time()
+            )
+        except TransformException:
+            return 0.0
+
+        v_cam = Vector3Stamped()
+        v_cam.header.stamp = rclpy.time.Time().to_msg()
+        v_cam.header.frame_id = self.camera_optical_frame
+        v_cam.vector.x = float(long_axis_cam[0])
+        v_cam.vector.y = float(long_axis_cam[1])
+        v_cam.vector.z = float(long_axis_cam[2])
+        v_base = do_transform_vector3(v_cam, tf)
+
+        long_angle_base = float(np.arctan2(v_base.vector.y, v_base.vector.x))
+        yaw_rad = long_angle_base - np.pi / 2.0
+        return float((yaw_rad + np.pi / 2.0) % np.pi - np.pi / 2.0)
 
     def _block_top_xyz_camera(
         self, contour: np.ndarray, u: int, v: int, depth_img: Optional[np.ndarray]
@@ -356,7 +416,7 @@ class TidyerPerceptionNode(Node):
         mask = np.zeros(depth_img.shape[:2], dtype=np.uint8)
         cv2.drawContours(mask, [contour], -1, 255, thickness=-1)
         # Erode to stay clear of edges.
-        mask = cv2.erode(mask, np.ones((5, 5), np.uint8), iterations=1)
+        mask = cv2.erode(mask, np.ones((5, 5), np.uint8), iterations=1) #if shadow, increase this value
         depth_vals = depth_img[mask > 0]
         depth_vals = depth_vals[depth_vals > 0]
         if depth_vals.size == 0:
@@ -397,28 +457,28 @@ class TidyerPerceptionNode(Node):
         pose.orientation.w = float(qw)
         return pose
 
-    def _matching_reference(
-        self, pick: Detection2D3D, reference: List[Detection2D3D]
-    ) -> Optional[Detection2D3D]:
-        # Pair the moved block with the reference slot of same label/shape that
-        # is FURTHEST from the pick centroid (i.e. the empty target slot).
-        best = None
-        best_dist = -1.0
-        for ref in reference:
-            if ref.label != pick.label or ref.shape != pick.shape:
-                continue
-            du = ref.centroid_uv[0] - pick.centroid_uv[0]
-            dv = ref.centroid_uv[1] - pick.centroid_uv[1]
-            dist = float(np.hypot(du, dv))
-            if dist > best_dist:
-                best_dist = dist
-                best = ref
-        return best
+    # def _matching_reference(
+    #     self, pick: Detection2D3D, reference: List[Detection2D3D]
+    # ) -> Optional[Detection2D3D]:
+    #     # Pair the moved block with the reference slot of same label/shape that
+    #     # is FURTHEST from the pick centroid (i.e. the empty target slot).
+    #     best = None
+    #     best_dist = -1.0
+    #     for ref in reference:
+    #         if ref.label != pick.label or ref.shape != pick.shape:
+    #             continue
+    #         du = ref.centroid_uv[0] - pick.centroid_uv[0]
+    #         dv = ref.centroid_uv[1] - pick.centroid_uv[1]
+    #         dist = float(np.hypot(du, dv))
+    #         if dist > best_dist:
+    #             best_dist = dist
+    #             best = ref
+    #     return best
 
     def _find_moved_objects(
         self, current: List[Detection2D3D], reference: List[Detection2D3D]
-    ) -> List[Detection2D3D]:
-        moved: List[Detection2D3D] = []
+    ) -> List[Tuple[Detection2D3D, Detection2D3D]]:
+        moved: List[Tuple[Detection2D3D, Detection2D3D]] = []
         used_curr_idx = set()
         for ref in reference:
             best_idx = None
@@ -438,7 +498,7 @@ class TidyerPerceptionNode(Node):
                 continue
             used_curr_idx.add(best_idx)
             if best_dist > self.position_tolerance_px:
-                moved.append(current[best_idx])
+                moved.append((current[best_idx], ref))
         return moved
 
     def _update_block_states(self, detections: List[Detection2D3D]) -> None:

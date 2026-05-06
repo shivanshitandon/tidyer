@@ -1,15 +1,13 @@
-from dataclasses import dataclass
-from typing import List, Union
+from typing import List, Optional, Union
 
 import rclpy
-from builtin_interfaces.msg import Duration as DurationMsg
 from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import Pose, PoseArray
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from trajectory_msgs.msg import JointTrajectory
 
 from tidyer.planning.ik import IKPlanner
 
@@ -31,24 +29,9 @@ DEFAULT_JOINTS = [
     -3.1400280634509485,
 ]
 
-
-@dataclass
-class PoseGoal:
-    pose: Pose
-
-
-@dataclass
-class JointGoal:
-    positions: List[float]
-    time_from_start_s: float = 5.0
-
-
-@dataclass
-class GripGoal:
-    pass
-
-
-Job = Union[PoseGoal, JointGoal, GripGoal]
+# Lab5 pattern: queue entries are either a JointState (planned move via
+# plan_to_joints) or the literal string 'toggle_grip' (gripper service).
+Job = Union[JointState, str]
 
 
 class UR7e_CubeGrasp(Node):
@@ -73,7 +56,7 @@ class UR7e_CubeGrasp(Node):
         )
         self.gripper_cli = self.create_client(Trigger, '/toggle_gripper')
 
-        self.joint_state: JointState = None
+        self.joint_state: Optional[JointState] = None
         self.ik_planner = IKPlanner()
 
         self.job_queue: List[Job] = []
@@ -81,10 +64,17 @@ class UR7e_CubeGrasp(Node):
 
         self._startup_timer = self.create_timer(0.1, self._startup_move)
 
+    @staticmethod
+    def _default_joint_state() -> JointState:
+        js = JointState()
+        js.name = list(UR_JOINT_NAMES)
+        js.position = list(DEFAULT_JOINTS)
+        return js
+
     def _startup_move(self) -> None:
         self._startup_timer.cancel()
         self.get_logger().info('Moving to default joint position at startup.')
-        self.job_queue.append(JointGoal(DEFAULT_JOINTS))
+        self.job_queue.append(self._default_joint_state())
         self.busy = True
         self.execute_jobs()
 
@@ -113,19 +103,46 @@ class UR7e_CubeGrasp(Node):
         pre_place = self._lift(place, self.gripper_offset_m + self.approach_height_m)
         place_pose = self._lift(place, self.gripper_offset_m - self.finger_insertion_m)
 
+        # Run IK for every waypoint up front, seed-chained: each call uses the
+        # previous IK result as its seed so the planner stays on a consistent
+        # IK branch across the pick->place transition (avoids wrist flips when
+        # the two yaws differ).
+        pre_pick_js = self._ik_or_abort(self.joint_state, pre_pick, 'pre-pick')
+        if pre_pick_js is None:
+            return
+        grasp_js = self._ik_or_abort(pre_pick_js, grasp_pick, 'grasp')
+        if grasp_js is None:
+            return
+        pre_place_js = self._ik_or_abort(grasp_js, pre_place, 'pre-place')
+        if pre_place_js is None:
+            return
+        place_js = self._ik_or_abort(pre_place_js, place_pose, 'place')
+        if place_js is None:
+            return
+
         self.job_queue = [
-            PoseGoal(pre_pick),
-            PoseGoal(grasp_pick),
-            GripGoal(),
-            PoseGoal(pre_pick),
-            PoseGoal(pre_place),
-            PoseGoal(place_pose),
-            GripGoal(),
-            PoseGoal(pre_place),
-            JointGoal(DEFAULT_JOINTS),
+            pre_pick_js,
+            grasp_js,
+            'toggle_grip',
+            pre_pick_js,
+            pre_place_js,
+            place_js,
+            'toggle_grip',
+            pre_place_js,
+            self._default_joint_state(),
         ]
         self.busy = True
         self.execute_jobs()
+
+    def _ik_or_abort(self, seed: JointState, pose: Pose, label: str) -> Optional[JointState]:
+        result = self.ik_planner.compute_ik(
+            seed,
+            pose.position.x, pose.position.y, pose.position.z,
+            pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w,
+        )
+        if result is None:
+            self.get_logger().error(f'IK failed for {label}; aborting cycle.')
+        return result
 
     @staticmethod
     def _lift(pose: Pose, dz: float) -> Pose:
@@ -145,37 +162,22 @@ class UR7e_CubeGrasp(Node):
         self.get_logger().info(f'Executing job queue, {len(self.job_queue)} jobs remaining.')
         next_job = self.job_queue.pop(0)
 
-        if isinstance(next_job, PoseGoal):
-            self._run_pose_goal(next_job.pose)
-        elif isinstance(next_job, JointGoal):
-            self._run_joint_goal(next_job.positions, next_job.time_from_start_s)
-        elif isinstance(next_job, GripGoal):
+        if isinstance(next_job, JointState):
+            self._run_planned_move(next_job)
+        elif next_job == 'toggle_grip':
             self._toggle_gripper()
         else:
             self.get_logger().error(f'Unknown job type: {type(next_job)}')
             self.execute_jobs()
 
-    def _run_pose_goal(self, pose: Pose) -> None:
-        ori = pose.orientation
-        traj = self.ik_planner.plan_to_pose(
-            pose.position.x, pose.position.y, pose.position.z,
-            ori.x, ori.y, ori.z, ori.w,
-        )
+    def _run_planned_move(self, target_joint_state: JointState) -> None:
+        traj = self.ik_planner.plan_to_joints(target_joint_state)
         if traj is None:
-            self.get_logger().error('Pose plan failed; skipping job.')
-            self.execute_jobs()
+            self.get_logger().error('Joint plan failed; aborting cycle.')
+            self.job_queue.clear()
+            self.busy = False
             return
         self._execute_joint_trajectory(traj.joint_trajectory)
-
-    def _run_joint_goal(self, positions: List[float], time_from_start_s: float) -> None:
-        traj = JointTrajectory()
-        traj.joint_names = list(UR_JOINT_NAMES)
-        point = JointTrajectoryPoint()
-        point.positions = list(positions)
-        point.time_from_start = DurationMsg(sec=int(time_from_start_s),
-                                            nanosec=int((time_from_start_s % 1) * 1e9))
-        traj.points = [point]
-        self._execute_joint_trajectory(traj)
 
     def _toggle_gripper(self) -> None:
         if not self.gripper_cli.wait_for_service(timeout_sec=5.0):

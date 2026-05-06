@@ -473,8 +473,9 @@ class TidyerPerceptionNode(Node):
         return (out.point.x, out.point.y, out.point.z)
 
     def _make_pose(self, xyz_base: Tuple[float, float, float], yaw_rad: float) -> Pose:
-        # Top-down EE: 180 deg about X (flips down), then yaw about world Z.
-        rot = R.from_euler('xyz', [np.pi, 0.0, yaw_rad])
+        # Top-down EE: 180 deg about Y (lab5 convention; quat (0,1,0,0) at yaw=0),
+        # then yaw about world Z.
+        rot = R.from_euler('xyz', [0.0, np.pi, yaw_rad])
         qx, qy, qz, qw = rot.as_quat()
         pose = Pose()
         pose.position.x = float(xyz_base[0])

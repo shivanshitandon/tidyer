@@ -599,18 +599,17 @@ class TidyerPerceptionNode(Node):
 
         h, w = image_shape[:2]
         _, _, bw, bh = cv2.boundingRect(displaced.contour)
-        required_radius = int(np.hypot(bw, bh) / 2) + self.free_spot_margin_px
 
         occupied = np.zeros((h, w), dtype=np.uint8)
         for det in current_detections:
             if det.contour is None:
                 continue
             cv2.drawContours(occupied, [det.contour], -1, 255, thickness=-1)
-        k = self.free_spot_margin_px * 2 + 1
-        occupied = cv2.dilate(occupied, np.ones((k, k), np.uint8), iterations=1)
 
-        # Restrict candidates to actual desk plane: valid depth, deeper than the
-        # block-top band (i.e. the bare desk surface).
+        # Strict desk-plane mask: depth within ±block_height_min of the desk
+        # depth. Any elevated pixel (block top, block side, undetected object,
+        # noise spike) is excluded — guards against stacking onto unsegmented
+        # objects (e.g. a color we don't have an HSV range for).
         desk_only = np.zeros((h, w), dtype=np.uint8)
         if depth_img is not None:
             depth_m = depth_img.astype(np.float32)
@@ -622,7 +621,7 @@ class TidyerPerceptionNode(Node):
                 desk_depth = float(np.percentile(sample, self.desk_plane_percentile))
                 near_desk = np.logical_and(
                     valid,
-                    depth_m >= desk_depth - self.block_height_min_m,
+                    np.abs(depth_m - desk_depth) <= self.block_height_min_m,
                 )
                 desk_only = (near_desk.astype(np.uint8)) * 255
 
@@ -630,13 +629,20 @@ class TidyerPerceptionNode(Node):
         if cv2.countNonZero(free_mask) == 0:
             return None
 
-        dist = cv2.distanceTransform(free_mask, cv2.DIST_L2, 5)
-        # Among pixels that have enough clearance to fit the displaced block,
-        # pick the one closest to the displaced block's current centroid so the
-        # arm moves as little as possible.
-        candidates_v, candidates_u = np.where(dist >= required_radius)
+        # Exact fit test: erode free_mask by the displaced block's bounding box
+        # (plus margin). A pixel survives iff the full (bw+2m)×(bh+2m) box
+        # centered there is entirely free desk — strictly stronger than the
+        # circular `dist >= half_diag` approximation, which let candidates
+        # snug up against neighbours when the block is rectangular.
+        m = self.free_spot_margin_px
+        fits_kernel = np.ones((bh + 2 * m, bw + 2 * m), np.uint8)
+        fits_mask = cv2.erode(free_mask, fits_kernel)
+
+        candidates_v, candidates_u = np.where(fits_mask > 0)
         if candidates_u.size == 0:
             return None
+        # Closest valid placement to the displaced block's current centroid so
+        # the arm moves as little as possible.
         cu, cv_ = displaced.centroid_uv
         d2 = (candidates_u - cu) ** 2 + (candidates_v - cv_) ** 2
         idx = int(np.argmin(d2))
@@ -663,24 +669,6 @@ class TidyerPerceptionNode(Node):
         pose.orientation.z = float(qz)
         pose.orientation.w = float(qw)
         return pose
-
-    # def _matching_reference(
-    #     self, pick: Detection2D3D, reference: List[Detection2D3D]
-    # ) -> Optional[Detection2D3D]:
-    #     # Pair the moved block with the reference slot of same label/shape that
-    #     # is FURTHEST from the pick centroid (i.e. the empty target slot).
-    #     best = None
-    #     best_dist = -1.0
-    #     for ref in reference:
-    #         if ref.label != pick.label or ref.shape != pick.shape:
-    #             continue
-    #         du = ref.centroid_uv[0] - pick.centroid_uv[0]
-    #         dv = ref.centroid_uv[1] - pick.centroid_uv[1]
-    #         dist = float(np.hypot(du, dv))
-    #         if dist > best_dist:
-    #             best_dist = dist
-    #             best = ref
-    #     return best
 
     def _find_moved_objects(
         self, current: List[Detection2D3D], reference: List[Detection2D3D]

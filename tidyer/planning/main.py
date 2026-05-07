@@ -60,6 +60,14 @@ class UR7e_CubeGrasp(Node):
         self.active_locations: List[Pose] = []
         self.overlap_threshold: float = 0.05
 
+        ## TODO: CHECK if these are the right intermediate locations for the camera setup, placeholder for now
+        self.intermediate_locations: List[Pose] = [
+            self._pose_from_xyz_yaw(0.30, 0.65, -0.16, 0.0),
+            self._pose_from_xyz_yaw(0.36, 0.65, -0.16, 0.0),
+            self._pose_from_xyz_yaw(0.42, 0.65, -0.16, 0.0),
+
+        ]
+
         # Geometry params (base_link frame).
         self.declare_parameter('gripper_offset_m', 0.150)       # wrist_3_link to fingertip
         self.declare_parameter('finger_insertion_m', 0.015)     # TODO: tune empirically
@@ -97,15 +105,95 @@ class UR7e_CubeGrasp(Node):
         js.position = list(DEFAULT_JOINTS)
         return js
     
-    def _overlap_check(self, new_pose: Pose) -> bool:
-        for existing in self.active_location:
+    def _overlap_check(self, new_pose: Pose) -> Optional[Pose]:
+        for existing in self.active_locations:
             dx = existing.position.x - new_pose.position.x
             dy = existing.position.y - new_pose.position.y
             dz = existing.position.z - new_pose.position.z
             dist = (dx**2 + dy**2 + dz**2)**0.5
             if dist < self.overlap_threshold:
-                return True
-        return False
+                return existing 
+        return None
+    
+    def _free_intermediate_location(self) -> Optional[Pose]:
+        for loc in self.intermediate_locations:
+            if not self._overlap_check(loc):
+                return loc
+        return None
+    
+    def _queue_pick_and_place(self, source: Pose, destination: Pose) -> bool:
+
+        pre_pick = self._lift(
+            source,
+            self.gripper_offset_m + self.approach_height_m
+        )
+
+        grasp_pick = self._lift(
+            source,
+            self.gripper_offset_m - self.finger_insertion_m
+        )
+
+        pre_place = self._lift(
+            destination,
+            self.gripper_offset_m + self.approach_height_m
+        )
+
+        place_pose = self._lift(
+            destination,
+            self.gripper_offset_m - self.finger_insertion_m
+        )
+
+        pre_pick_js = self._ik_or_abort(
+            self.joint_state,
+            pre_pick,
+            'pre-pick'
+        )
+
+        if pre_pick_js is None:
+            return False
+
+        grasp_js = self._ik_or_abort(
+            pre_pick_js,
+            grasp_pick,
+            'grasp'
+        )
+
+        if grasp_js is None:
+            return False
+
+        pre_place_js = self._ik_or_abort(
+            grasp_js,
+            pre_place,
+            'pre-place'
+        )
+
+        if pre_place_js is None:
+            return False
+
+        place_js = self._ik_or_abort(
+            pre_place_js,
+            place_pose,
+            'place'
+        )
+
+        if place_js is None:
+            return False
+
+        self.job_queue.extend([
+            pre_pick_js,
+            grasp_js,
+            'toggle_grip',
+
+            pre_pick_js,
+
+            pre_place_js,
+            place_js,
+            'toggle_grip',
+
+            pre_place_js,
+        ])
+
+        return True
 
     def _startup_move(self) -> None:
         # Wait for /joint_states so we can tell whether we're already home.
@@ -153,48 +241,41 @@ class UR7e_CubeGrasp(Node):
 
         pick = msg.poses[0]
         place = msg.poses[1]
-        if self._overlap_check(pick) or self._overlap_check(place):
-            self.get_logger().warn('Received pick/place pair too close to active location; ignoring.')
-            return
-        
-        self.active_location.append(pick)
-        self.active_location.append(place)
+        place_conflict = self._overlap_check(place)
 
-        pre_pick = self._lift(pick, self.gripper_offset_m + self.approach_height_m)
-        grasp_pick = self._lift(pick, self.gripper_offset_m - self.finger_insertion_m)
-        pre_place = self._lift(place, self.gripper_offset_m + self.approach_height_m)
-        place_pose = self._lift(place, self.gripper_offset_m - self.finger_insertion_m)
+        if place_conflict is not None:
 
-        # Run IK for every waypoint up front, seed-chained: each call uses the
-        # previous IK result as its seed so the planner stays on a consistent
-        # IK branch across the pick->place transition (avoids wrist flips when
-        # the two yaws differ).
-        pre_pick_js = self._ik_or_abort(self.joint_state, pre_pick, 'pre-pick')
-        if pre_pick_js is None:
+            self.get_logger().info(
+                'Place location occupied. Relocating blocking object.'
+            )
+
+            intermediate = self._free_intermediate_location()
+
+            if intermediate is None:
+                self.get_logger().error(
+                    'No free intermediate locations available.'
+                )
+                return
+            
+            success = self._queue_pick_and_place(place_conflict, intermediate)
+            if not success:
+                return
+
+            self.active_locations.remove(place_conflict)
+            self.active_locations.append(intermediate)
+        success = self._queue_pick_and_place( pick, place)
+
+        if not success:
             return
-        grasp_js = self._ik_or_abort(pre_pick_js, grasp_pick, 'grasp')
-        if grasp_js is None:
-            return
-        pre_place_js = self._ik_or_abort(grasp_js, pre_place, 'pre-place')
-        if pre_place_js is None:
-            return
-        place_js = self._ik_or_abort(pre_place_js, place_pose, 'place')
-        if place_js is None:
-            return
+        pick_conflict = self._overlap_check(pick)
+
+        if pick_conflict is not None:
+            self.active_locations.remove(pick_conflict)
+
+        self.active_locations.append(place)
+
         
-        self.job_queue = [
-            pre_pick_js,
-            grasp_js,
-            'toggle_grip',
-            pre_pick_js,
-            pre_place_js,
-            place_js,
-            'toggle_grip',
-            pre_place_js,
-            self._default_joint_state(),
-        ]
-        self.active_location.append(pick)
-        self.active_location.append(place)
+        self.job_queue.append(self._default_joint_state())
         self.busy = True
         self.execute_jobs()
 
@@ -252,9 +333,6 @@ class UR7e_CubeGrasp(Node):
             self.get_logger().info('Cycle complete; back at observation pose. Press "c" for next.')
             self.busy = False
 
-            if self.active_location:
-                self.get_logger().info('Clear active locations')
-                self.active_location.clear()   
             return
 
         self.get_logger().info(f'Executing job queue, {len(self.job_queue)} jobs remaining.')

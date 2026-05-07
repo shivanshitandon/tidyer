@@ -40,8 +40,8 @@ class UR7e_CubeGrasp(Node):
 
         # Geometry params (base_link frame).
         self.declare_parameter('gripper_offset_m', 0.150)       # wrist_3_link to fingertip
-        self.declare_parameter('finger_insertion_m', 0.015)     # TODO: tune empirically
-        self.declare_parameter('approach_height_m', 0.035)      # extra clearance above pre-grasp
+        self.declare_parameter('finger_insertion_m', 0.045)     # TODO: tune empirically
+        self.declare_parameter('approach_height_m', 0.015)      # extra clearance above pre-grasp
 
         self.gripper_offset_m = float(self.get_parameter('gripper_offset_m').value)
         self.finger_insertion_m = float(self.get_parameter('finger_insertion_m').value)

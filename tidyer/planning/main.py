@@ -72,11 +72,27 @@ class UR7e_CubeGrasp(Node):
         return js
 
     def _startup_move(self) -> None:
+        # Wait for /joint_states so we can tell whether we're already home.
+        if self.joint_state is None:
+            return
         self._startup_timer.cancel()
+        if self._at_default_pose():
+            self.get_logger().info('Already at default joint position; skipping startup move.')
+            self.busy = False
+            return
         self.get_logger().info('Moving to default joint position at startup.')
         self.job_queue.append(self._default_joint_state())
         self.busy = True
         self.execute_jobs()
+
+    def _at_default_pose(self, tol: float = 0.05) -> bool:
+        if self.joint_state is None:
+            return False
+        pos_by_name = dict(zip(self.joint_state.name, self.joint_state.position))
+        for name, target in zip(UR_JOINT_NAMES, DEFAULT_JOINTS):
+            if name not in pos_by_name or abs(pos_by_name[name] - target) > tol:
+                return False
+        return True
 
     def joint_state_callback(self, msg: JointState) -> None:
         self.joint_state = msg

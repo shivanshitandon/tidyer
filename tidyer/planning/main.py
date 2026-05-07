@@ -42,10 +42,15 @@ class UR7e_CubeGrasp(Node):
         self.declare_parameter('gripper_offset_m', 0.150)       # wrist_3_link to fingertip
         self.declare_parameter('finger_insertion_m', 0.045)     # TODO: tune empirically
         self.declare_parameter('approach_height_m', 0.015)      # extra clearance above pre-grasp
+        self.declare_parameter('default_pose_tol_rad', 0.02)    # post-cycle verification
+        self.declare_parameter('default_pose_max_retries', 2)
 
         self.gripper_offset_m = float(self.get_parameter('gripper_offset_m').value)
         self.finger_insertion_m = float(self.get_parameter('finger_insertion_m').value)
         self.approach_height_m = float(self.get_parameter('approach_height_m').value)
+        self.default_pose_tol_rad = float(self.get_parameter('default_pose_tol_rad').value)
+        self.default_pose_max_retries = int(self.get_parameter('default_pose_max_retries').value)
+        self._default_pose_retries = 0
 
         self.create_subscription(PoseArray, '/pick_place_pair', self.pair_callback, 1)
         self.create_subscription(JointState, '/joint_states', self.joint_state_callback, 1)
@@ -76,7 +81,7 @@ class UR7e_CubeGrasp(Node):
         if self.joint_state is None:
             return
         self._startup_timer.cancel()
-        if self._at_default_pose():
+        if self._at_default_pose(tol=0.05):
             self.get_logger().info('Already at default joint position; skipping startup move.')
             self.busy = False
             return
@@ -85,9 +90,11 @@ class UR7e_CubeGrasp(Node):
         self.busy = True
         self.execute_jobs()
 
-    def _at_default_pose(self, tol: float = 0.05) -> bool:
+    def _at_default_pose(self, tol: Optional[float] = None) -> bool:
         if self.joint_state is None:
             return False
+        if tol is None:
+            tol = self.default_pose_tol_rad
         pos_by_name = dict(zip(self.joint_state.name, self.joint_state.position))
         for name, target in zip(UR_JOINT_NAMES, DEFAULT_JOINTS):
             if name not in pos_by_name or abs(pos_by_name[name] - target) > tol:
@@ -171,9 +178,31 @@ class UR7e_CubeGrasp(Node):
 
     def execute_jobs(self) -> None:
         if not self.job_queue:
-            self.get_logger().info('Cycle complete; back at observation pose. Press "c" for next.')
-            self.busy = False
-            return
+            # Verify we actually returned to default — controller can declare a
+            # trajectory complete short of the goal (e.g. protective stop, IK
+            # commanded a near-home but not-home state). Re-issue if needed.
+            if self._at_default_pose():
+                self._default_pose_retries = 0
+                self.get_logger().info(
+                    'Cycle complete; verified at default pose. Press "c" for next.'
+                )
+                self.busy = False
+                return
+            if self._default_pose_retries >= self.default_pose_max_retries:
+                self.get_logger().error(
+                    f'Failed to reach default pose after '
+                    f'{self._default_pose_retries} retries; aborting cycle.'
+                )
+                self._default_pose_retries = 0
+                self.busy = False
+                return
+            self._default_pose_retries += 1
+            self.get_logger().warn(
+                f'Not at default pose after cycle (tol={self.default_pose_tol_rad} rad); '
+                f're-queuing default move (retry '
+                f'{self._default_pose_retries}/{self.default_pose_max_retries}).'
+            )
+            self.job_queue.append(self._default_joint_state())
 
         self.get_logger().info(f'Executing job queue, {len(self.job_queue)} jobs remaining.')
         next_job = self.job_queue.pop(0)

@@ -25,6 +25,7 @@ class Detection2D3D:
     area_px: float
     xyz_cam: Optional[Tuple[float, float, float]]
     yaw_rad: float
+    contour: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -67,6 +68,11 @@ class TidyerPerceptionNode(Node):
         self.declare_parameter('block_height_max_m', 0.15)
         self.declare_parameter('track_match_distance_px', 65.0)
         self.declare_parameter('state_output_path', '')
+        # Tighter than typical block heights so a stacked block (which sits
+        # ~block_height closer to the camera than the reference top) does NOT
+        # match — only same-layer swaps trigger displacement.
+        self.declare_parameter('place_occupied_depth_thresh_m', 0.02)
+        self.declare_parameter('free_spot_margin_px', 20)
 
         # HSV config by label: [[h_lo,s_lo,v_lo],[h_hi,s_hi,v_hi]]
         self.declare_parameter(
@@ -94,6 +100,10 @@ class TidyerPerceptionNode(Node):
         self.block_height_max_m = float(self.get_parameter('block_height_max_m').value)
         self.track_match_distance_px = float(self.get_parameter('track_match_distance_px').value)
         self.state_output_path = str(self.get_parameter('state_output_path').value)
+        self.place_occupied_depth_thresh_m = float(
+            self.get_parameter('place_occupied_depth_thresh_m').value
+        )
+        self.free_spot_margin_px = int(self.get_parameter('free_spot_margin_px').value)
         self.hsv_ranges: Dict[str, Tuple[np.ndarray, np.ndarray]] = self._load_hsv_ranges()
 
         self.fx: Optional[float] = None
@@ -204,6 +214,45 @@ class TidyerPerceptionNode(Node):
             response.message = 'Missing depth for place point.'
             return response
 
+        # If something is already sitting at the place point (same depth plane,
+        # i.e. a swap rather than a stack), displace it first and let the next
+        # /capture_current trigger handle the originally-targeted move.
+        displaced = False
+        occupier = self._occupier_at_place(
+            place.centroid_uv, place.xyz_cam, current, depth_snap
+        )
+        if occupier is not None:
+            free = self._find_free_spot(occupier, current, depth_snap, rgb_snap.shape)
+            if free is None:
+                response.success = False
+                response.message = (
+                    f'Place point {place.centroid_uv} occupied by '
+                    f'{occupier.label}/{occupier.shape}; no free spot found.'
+                )
+                self.get_logger().warn(response.message)
+                return response
+            free_u, free_v, free_xyz = free
+            if occupier.xyz_cam is None:
+                response.success = False
+                response.message = 'Occupier missing depth; cannot displace.'
+                return response
+            self.get_logger().info(
+                f'Place point {place.centroid_uv} occupied by '
+                f'{occupier.label}/{occupier.shape}; displacing to '
+                f'pixel ({free_u},{free_v}) before original move.'
+            )
+            pick = occupier
+            place = Detection2D3D(
+                label=occupier.label,
+                shape=occupier.shape,
+                centroid_uv=(free_u, free_v),
+                area_px=occupier.area_px,
+                xyz_cam=free_xyz,
+                yaw_rad=occupier.yaw_rad,
+                contour=None,
+            )
+            displaced = True
+
         try:
             pick_base = self._camera_point_to_base(pick.xyz_cam)
             place_base = self._camera_point_to_base(place.xyz_cam)
@@ -231,17 +280,24 @@ class TidyerPerceptionNode(Node):
         cv2.imwrite(str(pair_subdir / 'curr_pick.png'), pick_vis)
 
         place_uv = place.centroid_uv
-        place_vis = self.reference_image.copy()
+        # Displacement places onto a free spot in the CURRENT scene; the
+        # reference image has no marker at that pixel, so draw on the current
+        # frame in that case.
+        place_bg = rgb_snap if displaced else self.reference_image
+        place_vis = place_bg.copy()
         cv2.circle(place_vis, place_uv, 12, (0, 255, 0), 2)
         cv2.circle(place_vis, place_uv, 3, (0, 255, 0), -1)
-        cv2.putText(place_vis, 'PLACE', (place_uv[0] + 14, place_uv[1] + 6),
+        place_label = 'PLACE (DISPLACE)' if displaced else 'PLACE'
+        cv2.putText(place_vis, place_label, (place_uv[0] + 14, place_uv[1] + 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.imwrite(str(pair_subdir / 'ref_place.png'), place_vis)
+        place_filename = 'curr_place_displace.png' if displaced else 'ref_place.png'
+        cv2.imwrite(str(pair_subdir / place_filename), place_vis)
 
         metadata = {
             'timestamp': ts,
             'color': pick.label,
             'shape': pick.shape,
+            'displaced': bool(displaced),
             'pick': {
                 'pixel_uv': [int(pick_uv[0]), int(pick_uv[1])],
                 'xyz_base_m': [float(pick_base[0]), float(pick_base[1]), float(pick_base[2])],
@@ -311,6 +367,7 @@ class TidyerPerceptionNode(Node):
                         area_px=area,
                         xyz_cam=xyz,
                         yaw_rad=yaw,
+                        contour=contour,
                     )
                 )
         cv2.imshow('Detections', bgr_vis)
@@ -489,6 +546,101 @@ class TidyerPerceptionNode(Node):
         )
         out = do_transform_point(pt, tf)
         return (out.point.x, out.point.y, out.point.z)
+
+    def _depth_at_pixel_m(
+        self, u: int, v: int, depth_img: np.ndarray
+    ) -> Optional[float]:
+        if v < 0 or u < 0 or v >= depth_img.shape[0] or u >= depth_img.shape[1]:
+            return None
+        z_raw = depth_img[v, u]
+        if z_raw == 0:
+            return None
+        return float(z_raw) / 1000.0 if depth_img.dtype == np.uint16 else float(z_raw)
+
+    def _occupier_at_place(
+        self,
+        place_uv: Tuple[int, int],
+        place_xyz_cam: Tuple[float, float, float],
+        current_detections: List[Detection2D3D],
+        depth_img: Optional[np.ndarray],
+    ) -> Optional[Detection2D3D]:
+        # A swap (vs. a stack on top of the existing block) is detected when a
+        # current contour overlaps the place pixel AND the depth at that pixel
+        # is at the SAME plane as the reference block's top. Stacked blocks sit
+        # closer to the camera, so their depth diff exceeds the threshold and
+        # we leave them alone.
+        if depth_img is None:
+            return None
+        u, v = place_uv
+        z_curr = self._depth_at_pixel_m(u, v, depth_img)
+        if z_curr is None:
+            return None
+        if abs(z_curr - place_xyz_cam[2]) > self.place_occupied_depth_thresh_m:
+            return None
+        for det in current_detections:
+            if det.contour is None:
+                continue
+            if cv2.pointPolygonTest(det.contour, (float(u), float(v)), False) >= 0:
+                return det
+        return None
+
+    def _find_free_spot(
+        self,
+        displaced: Detection2D3D,
+        current_detections: List[Detection2D3D],
+        depth_img: Optional[np.ndarray],
+        image_shape: Tuple[int, ...],
+    ) -> Optional[Tuple[int, int, Tuple[float, float, float]]]:
+        if displaced.contour is None or displaced.xyz_cam is None:
+            return None
+        if self.fx is None or self.fy is None or self.cx is None or self.cy is None:
+            return None
+
+        h, w = image_shape[:2]
+        _, _, bw, bh = cv2.boundingRect(displaced.contour)
+        required_radius = int(np.hypot(bw, bh) / 2) + self.free_spot_margin_px
+
+        occupied = np.zeros((h, w), dtype=np.uint8)
+        for det in current_detections:
+            if det.contour is None:
+                continue
+            cv2.drawContours(occupied, [det.contour], -1, 255, thickness=-1)
+        k = self.free_spot_margin_px * 2 + 1
+        occupied = cv2.dilate(occupied, np.ones((k, k), np.uint8), iterations=1)
+
+        # Restrict candidates to actual desk plane: valid depth, deeper than the
+        # block-top band (i.e. the bare desk surface).
+        desk_only = np.zeros((h, w), dtype=np.uint8)
+        if depth_img is not None:
+            depth_m = depth_img.astype(np.float32)
+            if depth_img.dtype == np.uint16:
+                depth_m /= 1000.0
+            valid = depth_m > 0.0
+            sample = depth_m[valid]
+            if sample.size >= 200:
+                desk_depth = float(np.percentile(sample, self.desk_plane_percentile))
+                near_desk = np.logical_and(
+                    valid,
+                    depth_m >= desk_depth - self.block_height_min_m,
+                )
+                desk_only = (near_desk.astype(np.uint8)) * 255
+
+        free_mask = cv2.bitwise_and(desk_only, cv2.bitwise_not(occupied))
+        if cv2.countNonZero(free_mask) == 0:
+            return None
+
+        dist = cv2.distanceTransform(free_mask, cv2.DIST_L2, 5)
+        _, max_dist, _, max_loc = cv2.minMaxLoc(dist)
+        if max_dist < required_radius:
+            return None
+        free_u, free_v = int(max_loc[0]), int(max_loc[1])
+
+        # Reuse the displaced block's top z so the place pose lands the block
+        # on the desk at the same height as where it was picked from.
+        z_m = float(displaced.xyz_cam[2])
+        x_m = (free_u - self.cx) * z_m / self.fx
+        y_m = (free_v - self.cy) * z_m / self.fy
+        return free_u, free_v, (x_m, y_m, z_m)
 
     def _make_pose(self, xyz_base: Tuple[float, float, float], yaw_rad: float) -> Pose:
         # Top-down EE: 180 deg about Y (lab5 convention; quat (0,1,0,0) at yaw=0),

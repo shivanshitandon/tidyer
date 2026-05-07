@@ -368,8 +368,8 @@ class TidyerPerceptionNode(Node):
 
         Back-projects the block-top pixels through depth, runs PCA in
         camera_color_optical_frame, transforms the long-axis direction into
-        base_link, and returns the yaw aligned with the long axis. Returns
-        0.0 on any failure or near-symmetric block.
+        base_link, and returns the closing-direction yaw (perpendicular to the
+        long axis). Returns 0.0 on any failure or near-symmetric block.
         """
         if depth_img is None:
             return 0.0
@@ -440,8 +440,11 @@ class TidyerPerceptionNode(Node):
         v_base = do_transform_vector3(v_cam, tf)
 
         long_angle_base = float(np.arctan2(v_base.vector.y, v_base.vector.x))
+        # Closing axis must be perpendicular to the block's long axis so the
+        # fingers span the long sides and pinch across the short dimension.
         # Long axis is bidirectional (period π); wrap to [-π/2, π/2).
-        return float((long_angle_base + np.pi / 2.0) % np.pi - np.pi / 2.0)
+        yaw_rad = long_angle_base - np.pi / 2.0
+        return float((yaw_rad + np.pi / 2.0) % np.pi - np.pi / 2.0)
 
     def _block_top_xyz_camera(
         self, contour: np.ndarray, u: int, v: int, depth_img: Optional[np.ndarray]

@@ -219,7 +219,7 @@ class TidyerPerceptionNode(Node):
         # /capture_current trigger handle the originally-targeted move.
         displaced = False
         occupier = self._occupier_at_place(
-            place.centroid_uv, place.xyz_cam, current, depth_snap
+            place.centroid_uv, place.xyz_cam, current
         )
         if occupier is not None:
             free = self._find_free_spot(occupier, current, depth_snap, rgb_snap.shape)
@@ -564,27 +564,31 @@ class TidyerPerceptionNode(Node):
         place_uv: Tuple[int, int],
         place_xyz_cam: Tuple[float, float, float],
         current_detections: List[Detection2D3D],
-        depth_img: Optional[np.ndarray],
     ) -> Optional[Detection2D3D]:
-        # A swap (vs. a stack on top of the existing block) is detected when a
-        # current contour overlaps the place pixel AND the depth at that pixel
-        # is at the SAME plane as the reference block's top. Stacked blocks sit
-        # closer to the camera, so their depth diff exceeds the threshold and
-        # we leave them alone.
-        if depth_img is None:
-            return None
+        # A swap (vs. a stack) is detected when a current detection sits at
+        # the reference place location on the same depth plane. Single-pixel
+        # depth/contour tests at place_uv are fragile (centroids jitter, edges
+        # leak depth), so accept any detection whose centroid is within
+        # position_tolerance_px OR whose contour contains place_uv, then verify
+        # using the detection's contour-sampled top-z.
         u, v = place_uv
-        z_curr = self._depth_at_pixel_m(u, v, depth_img)
-        if z_curr is None:
-            return None
-        if abs(z_curr - place_xyz_cam[2]) > self.place_occupied_depth_thresh_m:
-            return None
+        best = None
+        best_dist = float('inf')
         for det in current_detections:
-            if det.contour is None:
+            if det.contour is None or det.xyz_cam is None:
                 continue
-            if cv2.pointPolygonTest(det.contour, (float(u), float(v)), False) >= 0:
-                return det
-        return None
+            du = det.centroid_uv[0] - u
+            dv = det.centroid_uv[1] - v
+            dist = float(np.hypot(du, dv))
+            contains = cv2.pointPolygonTest(det.contour, (float(u), float(v)), False) >= 0
+            if not contains and dist > self.position_tolerance_px:
+                continue
+            if abs(det.xyz_cam[2] - place_xyz_cam[2]) > self.place_occupied_depth_thresh_m:
+                continue
+            if dist < best_dist:
+                best_dist = dist
+                best = det
+        return best
 
     def _find_free_spot(
         self,

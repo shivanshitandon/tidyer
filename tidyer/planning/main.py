@@ -1,10 +1,12 @@
 from typing import List, Optional, Union
 
+import numpy as np
 import rclpy
 from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import Pose, PoseArray
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
 from trajectory_msgs.msg import JointTrajectory
@@ -29,6 +31,24 @@ DEFAULT_JOINTS = [
     -3.1400280634509485,
 ]
 
+# Hardcoded pick/place pairs in base_link from successful camera runs.
+HARDCODED_PAIRS = [
+    {
+        'name': 'yellow_rectangle',
+        'pick_xyz': (-0.03578039524852805, 0.5472794341780659, -0.16157448993247991),
+        'pick_yaw': 0.6055507724605418,
+        'place_xyz': (0.020677794333050198, 0.5387825324148371, -0.15546467628787453),
+        'place_yaw': -0.054235710904864565,
+    },
+    {
+        'name': 'blue_rectangle',
+        'pick_xyz': (0.22096279925070234, 0.46760614064292017, -0.16398030039062095),
+        'pick_yaw': -0.8411308775631364,
+        'place_xyz': (0.1475358967402308, 0.5319506789729332, -0.163920298588218),
+        'place_yaw': 0.21127379438372085,
+    },
+]
+
 # Lab5 pattern: queue entries are either a JointState (planned move via
 # plan_to_joints) or the literal string 'toggle_grip' (gripper service).
 Job = Union[JointState, str]
@@ -42,10 +62,12 @@ class UR7e_CubeGrasp(Node):
         self.declare_parameter('gripper_offset_m', 0.150)       # wrist_3_link to fingertip
         self.declare_parameter('finger_insertion_m', 0.015)     # TODO: tune empirically
         self.declare_parameter('approach_height_m', 0.035)      # extra clearance above pre-grasp
+        self.declare_parameter('hardcoded_pair_index', 0)
 
         self.gripper_offset_m = float(self.get_parameter('gripper_offset_m').value)
         self.finger_insertion_m = float(self.get_parameter('finger_insertion_m').value)
         self.approach_height_m = float(self.get_parameter('approach_height_m').value)
+        self.hardcoded_pair_index = int(self.get_parameter('hardcoded_pair_index').value)
 
         self.create_subscription(PoseArray, '/pick_place_pair', self.pair_callback, 1)
         self.create_subscription(JointState, '/joint_states', self.joint_state_callback, 1)
@@ -61,8 +83,10 @@ class UR7e_CubeGrasp(Node):
 
         self.job_queue: List[Job] = []
         self.busy: bool = False
+        self.hardcoded_cycle_started: bool = False
 
         self._startup_timer = self.create_timer(0.1, self._startup_move)
+        self._hardcoded_timer = self.create_timer(0.3, self._maybe_start_hardcoded_cycle)
 
     @staticmethod
     def _default_joint_state() -> JointState:
@@ -97,7 +121,11 @@ class UR7e_CubeGrasp(Node):
     def joint_state_callback(self, msg: JointState) -> None:
         self.joint_state = msg
 
-    def pair_callback(self, msg: PoseArray) -> None:
+    def pair_callback(self, _msg: PoseArray) -> None:
+        self.get_logger().info('Ignoring /pick_place_pair input; planner is in hardcoded mode.')
+        return
+
+    def _run_pair(self, msg: PoseArray) -> None:
         print("RUNNING THE PAIR CALLBACK")
         self.get_logger().info("RUNNING THE PAIR CALLBACK")
         self.get_logger().info(f"Busy: {self.busy}")
@@ -149,6 +177,36 @@ class UR7e_CubeGrasp(Node):
         ]
         self.busy = True
         self.execute_jobs()
+
+    def _maybe_start_hardcoded_cycle(self) -> None:
+        if self.hardcoded_cycle_started:
+            return
+        if self.busy or self.joint_state is None:
+            return
+        idx = max(0, min(self.hardcoded_pair_index, len(HARDCODED_PAIRS) - 1))
+        pair = HARDCODED_PAIRS[idx]
+        pick = self._pose_from_xyz_yaw(*pair['pick_xyz'], pair['pick_yaw'])
+        place = self._pose_from_xyz_yaw(*pair['place_xyz'], pair['place_yaw'])
+        msg = PoseArray()
+        msg.poses = [pick, place]
+        self.hardcoded_cycle_started = True
+        self.get_logger().info(
+            f"Hardcoded pair mode: running '{pair['name']}' (index={idx})."
+        )
+        self._run_pair(msg)
+
+    @staticmethod
+    def _pose_from_xyz_yaw(x: float, y: float, z: float, yaw_rad: float) -> Pose:
+        qx, qy, qz, qw = R.from_euler('xyz', [np.pi, 0.0, yaw_rad]).as_quat()
+        pose = Pose()
+        pose.position.x = float(x)
+        pose.position.y = float(y)
+        pose.position.z = float(z)
+        pose.orientation.x = float(qx)
+        pose.orientation.y = float(qy)
+        pose.orientation.z = float(qz)
+        pose.orientation.w = float(qw)
+        return pose
 
     def _ik_or_abort(self, seed: JointState, pose: Pose, label: str) -> Optional[JointState]:
         result = self.ik_planner.compute_ik(

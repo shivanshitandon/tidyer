@@ -508,32 +508,58 @@ class TidyerPerceptionNode(Node):
         self, contour: np.ndarray, u: int, v: int, depth_img: Optional[np.ndarray]
     ) -> Optional[Tuple[float, float, float]]:
         if depth_img is None:
-            print("No depth image, cannot compute 3D position.")
             return None
-        if self.fx is None or self.fy is None or self.cx is None or self.cy is None: 
-            print("Camera intrinsics not set, cannot compute 3D position.")
+        if self.fx is None or self.fy is None or self.cx is None or self.cy is None:
             return None
         if v < 0 or u < 0 or v >= depth_img.shape[0] or u >= depth_img.shape[1]:
-            print("Invalid pixel coordinates, cannot compute 3D position.")
             return None
 
-        # Sample depth inside the contour to avoid pulling in desk pixels.
         mask = np.zeros(depth_img.shape[:2], dtype=np.uint8)
         cv2.drawContours(mask, [contour], -1, 255, thickness=-1)
-        # Erode to stay clear of edges.
-        mask = cv2.erode(mask, np.ones((5, 5), np.uint8), iterations=1) #if shadow, increase this value
-        depth_vals = depth_img[mask > 0]
-        depth_vals = depth_vals[depth_vals > 0]
-        if depth_vals.size == 0:
-            print("No valid depth pixels in contour, cannot compute 3D position.")
-            return None
+        # Erode harder than for yaw — we need to stay off the side faces entirely
+        # so neither specular nor sloped pixels bias the top-plateau estimate.
+        mask = cv2.erode(mask, np.ones((9, 9), np.uint8), iterations=1)
 
-        # Block top is the *closest* (smallest depth) plateau inside the contour.
-        z_raw = float(np.percentile(depth_vals, 20))
-        z_m = z_raw / 1000.0 if depth_img.dtype == np.uint16 else z_raw
-        x_m = (u - self.cx) * z_m / self.fx
-        y_m = (v - self.cy) * z_m / self.fy
-        return (x_m, y_m, z_m)
+        ys_px, xs_px = np.where(mask > 0)
+        if ys_px.size < 50:
+            return None
+        zs_raw = depth_img[ys_px, xs_px].astype(np.float32)
+        keep = zs_raw > 0
+        ys_px, xs_px, zs_raw = ys_px[keep], xs_px[keep], zs_raw[keep]
+        if zs_raw.size < 50:
+            return None
+        zs_m = zs_raw / 1000.0 if depth_img.dtype == np.uint16 else zs_raw
+        zs_m = zs_m.astype(np.float32)
+
+        # Pick the densest plateau closest to the camera as the block top.
+        # Both specular near-outliers and side-face/desk leak fail the density
+        # test, so this is robust where a bare percentile is bidirectionally
+        # sensitive.
+        bin_w = 0.002  # 2 mm bins
+        z_lo, z_hi = float(zs_m.min()), float(zs_m.max())
+        if z_hi - z_lo < bin_w:
+            z_top = float(np.median(zs_m))
+        else:
+            n_bins = max(4, int(np.ceil((z_hi - z_lo) / bin_w)))
+            counts, edges = np.histogram(zs_m, bins=n_bins, range=(z_lo, z_hi))
+            thresh = max(10, int(0.15 * zs_m.size))
+            dense = np.where(counts >= thresh)[0]
+            if dense.size == 0:
+                z_top = float(np.percentile(zs_m, 15))
+            else:
+                i = int(dense[0])
+                z_top = 0.5 * (float(edges[i]) + float(edges[i + 1]))
+
+        # Re-project x,y from only the top-plateau pixels so x,y are not
+        # dragged by side-face or desk-leak samples.
+        band_half = bin_w
+        band = (zs_m >= z_top - band_half) & (zs_m <= z_top + band_half)
+        if int(band.sum()) < 20:
+            band = np.ones_like(zs_m, dtype=bool)
+        zs_b = zs_m[band]
+        xs_m = (xs_px[band].astype(np.float32) - self.cx) * zs_b / self.fx
+        ys_m = (ys_px[band].astype(np.float32) - self.cy) * zs_b / self.fy
+        return float(np.median(xs_m)), float(np.median(ys_m)), float(np.median(zs_b))
 
     def _camera_point_to_base(self, xyz_cam: Tuple[float, float, float]) -> Tuple[float, float, float]:
         pt = PointStamped()

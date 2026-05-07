@@ -57,7 +57,7 @@ Job = Union[JointState, str]
 class UR7e_CubeGrasp(Node):
     def __init__(self) -> None:
         super().__init__('cube_grasp')
-        self.active_location: List[Pose] = []
+        self.active_locations: List[Pose] = []
         self.overlap_threshold: float = 0.05
 
         # Geometry params (base_link frame).

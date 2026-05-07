@@ -57,6 +57,8 @@ Job = Union[JointState, str]
 class UR7e_CubeGrasp(Node):
     def __init__(self) -> None:
         super().__init__('cube_grasp')
+        self.active_location: List[Pose] = []
+        self.overlap_threshold: float = 0.05
 
         # Geometry params (base_link frame).
         self.declare_parameter('gripper_offset_m', 0.150)       # wrist_3_link to fingertip
@@ -94,6 +96,16 @@ class UR7e_CubeGrasp(Node):
         js.name = list(UR_JOINT_NAMES)
         js.position = list(DEFAULT_JOINTS)
         return js
+    
+    def _overlap_check(self, new_pose: Pose) -> bool:
+        for existing in self.active_location:
+            dx = existing.position.x - new_pose.position.x
+            dy = existing.position.y - new_pose.position.y
+            dz = existing.position.z - new_pose.position.z
+            dist = (dx**2 + dy**2 + dz**2)**0.5
+            if dist < self.overlap_threshold:
+                return True
+        return False
 
     def _startup_move(self) -> None:
         # Wait for /joint_states so we can tell whether we're already home.
@@ -141,6 +153,9 @@ class UR7e_CubeGrasp(Node):
 
         pick = msg.poses[0]
         place = msg.poses[1]
+        if self._overlap_check(pick) or self._overlap_check(place):
+            self.get_logger().warn('Received pick/place pair too close to active location; ignoring.')
+            return
 
         pre_pick = self._lift(pick, self.gripper_offset_m + self.approach_height_m)
         grasp_pick = self._lift(pick, self.gripper_offset_m - self.finger_insertion_m)
@@ -163,6 +178,9 @@ class UR7e_CubeGrasp(Node):
         place_js = self._ik_or_abort(pre_place_js, place_pose, 'place')
         if place_js is None:
             return
+        
+        self.active_locations.append(pick)
+        self.active_locations.append(place)
 
         self.job_queue = [
             pre_pick_js,
@@ -231,6 +249,10 @@ class UR7e_CubeGrasp(Node):
         if not self.job_queue:
             self.get_logger().info('Cycle complete; back at observation pose. Press "c" for next.')
             self.busy = False
+
+            if self.active_locations:
+                self.get_logger().info('Clear active locations')
+                self.active_locations.clear()   
             return
 
         self.get_logger().info(f'Executing job queue, {len(self.job_queue)} jobs remaining.')

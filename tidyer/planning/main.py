@@ -42,10 +42,13 @@ class UR7e_CubeGrasp(Node):
         self.declare_parameter('gripper_offset_m', 0.150)       # wrist_3_link to fingertip
         self.declare_parameter('finger_insertion_m', 0.015)     # TODO: tune empirically
         self.declare_parameter('approach_height_m', 0.035)      # extra clearance above pre-grasp
+        self.declare_parameter('rehome_every_n_cycles', 2)      # 0 disables periodic re-home
 
         self.gripper_offset_m = float(self.get_parameter('gripper_offset_m').value)
         self.finger_insertion_m = float(self.get_parameter('finger_insertion_m').value)
         self.approach_height_m = float(self.get_parameter('approach_height_m').value)
+        self.rehome_every_n_cycles = int(self.get_parameter('rehome_every_n_cycles').value)
+        self._cycles_since_rehome = 0
 
         self.create_subscription(PoseArray, '/pick_place_pair', self.pair_callback, 1)
         self.create_subscription(JointState, '/joint_states', self.joint_state_callback, 1)
@@ -136,7 +139,7 @@ class UR7e_CubeGrasp(Node):
         if place_js is None:
             return
 
-        self.job_queue = [
+        cycle: List[Job] = [
             pre_pick_js,
             grasp_js,
             'toggle_grip',
@@ -147,6 +150,21 @@ class UR7e_CubeGrasp(Node):
             pre_place_js,
             self._default_joint_state(),
         ]
+
+        # Periodic forced re-home: even though every cycle ends at the default
+        # pose, on errors the queue is cleared mid-flight and that trailing
+        # home gets skipped. After N successful cycles, prepend an explicit
+        # home move so any accumulated drift is reset before the next pick.
+        n = self.rehome_every_n_cycles
+        if n > 0 and self._cycles_since_rehome >= n:
+            self.get_logger().info(
+                f'Forcing re-home after {self._cycles_since_rehome} cycles.'
+            )
+            cycle.insert(0, self._default_joint_state())
+            self._cycles_since_rehome = 0
+        self._cycles_since_rehome += 1
+
+        self.job_queue = cycle
         self.busy = True
         self.execute_jobs()
 

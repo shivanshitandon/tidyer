@@ -54,7 +54,19 @@ def generate_launch_description():
     return LaunchDescription(
         [
             realsense,
-            Node(package='tidyer', executable='process_pointcloud', output='screen'),
+            Node(
+                package='tidyer',
+                executable='process_pointcloud',
+                output='screen',
+                parameters=[
+                    {
+                        'pick_order_strategy': 'weighted',
+                        'pick_order_w_uv': 1.0,
+                        'pick_order_w_area': 1.0,
+                        'pick_order_w_clearance': 1.0,
+                    }
+                ],
+            ),
             Node(package='tidyer', executable='tidyer_tf', output='screen'),
             Node(package='tidyer', executable='tidyer_pick_place', output='screen'),
             moveit,

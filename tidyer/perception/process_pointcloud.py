@@ -44,7 +44,8 @@ class TidyerPerceptionNode(Node):
 
     Captures triggered by services:
       /capture_reference  : snapshot the current frame as the target scene
-      /capture_current    : segment vs reference, rank moved blocks in 2D,
+      /capture_current    : segment vs reference, rank moved blocks in 2D
+                            (default pick_order_strategy: weighted UV/area/clearance),
                             publish one (pick, place) pair on /pick_place_pair
                             as PoseArray in base_link.
     """
@@ -68,7 +69,7 @@ class TidyerPerceptionNode(Node):
         self.declare_parameter('block_height_max_m', 0.15)
         self.declare_parameter('track_match_distance_px', 65.0)
         self.declare_parameter('state_output_path', '')
-        self.declare_parameter('pick_order_strategy', 'area')
+        self.declare_parameter('pick_order_strategy', 'weighted')
         self.declare_parameter('pick_order_w_uv', 1.0)
         self.declare_parameter('pick_order_w_area', 1.0)
         self.declare_parameter('pick_order_w_clearance', 1.0)
@@ -539,6 +540,21 @@ class TidyerPerceptionNode(Node):
         def norm_clear(r: Dict[str, object]) -> float:
             return float(r['clearance_px']) / (max_clear + eps)  # type: ignore[arg-type]
 
+        def weighted_order() -> List[int]:
+            for i in range(n):
+                r = rows[i]
+                comp = (
+                    self.pick_order_w_uv * norm_uv(r)
+                    + self.pick_order_w_area * norm_area(r)
+                    + self.pick_order_w_clearance * norm_clear(r)
+                )
+                r['weighted_score'] = float(comp)
+            return sorted(
+                range(n),
+                key=lambda i: float(rows[i]['weighted_score']),  # type: ignore[arg-type]
+                reverse=True,
+            )
+
         order: List[int]
         if strategy == 'area':
             order = sorted(range(n), key=lambda i: float(rows[i]['area_px']), reverse=True)
@@ -554,24 +570,12 @@ class TidyerPerceptionNode(Node):
                 key=lambda i: float(rows[i]['uv_displacement_px']),
             )
         elif strategy == 'weighted':
-            for i in range(n):
-                r = rows[i]
-                comp = (
-                    self.pick_order_w_uv * norm_uv(r)
-                    + self.pick_order_w_area * norm_area(r)
-                    + self.pick_order_w_clearance * norm_clear(r)
-                )
-                r['weighted_score'] = float(comp)
-            order = sorted(
-                range(n),
-                key=lambda i: float(rows[i]['weighted_score']),  # type: ignore[arg-type]
-                reverse=True,
-            )
+            order = weighted_order()
         else:
             self.get_logger().warn(
-                f'Unknown pick_order_strategy "{strategy}", using "area".'
+                f'Unknown pick_order_strategy "{strategy}", using "weighted".'
             )
-            order = sorted(range(n), key=lambda i: float(rows[i]['area_px']), reverse=True)
+            order = weighted_order()
 
         ranked_pairs = [pairs[i] for i in order]
         debug_rows = [rows[i] for i in order]

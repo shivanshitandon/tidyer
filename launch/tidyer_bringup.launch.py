@@ -13,21 +13,21 @@ def generate_launch_description():
     ur_type = LaunchConfiguration('ur_type', default='ur7e')
     launch_rviz = LaunchConfiguration('launch_rviz', default='true')
 
-    realsense = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory('realsense2_camera'),
-                'launch',
-                'rs_launch.py',
-            )
-        ),
-        launch_arguments={
-            'pointcloud.enable': 'true',
-            'align_depth.enable': 'true',
-            'rgb_camera.color_profile': '1920x1080x30',
-            'depth_camera.depth_profile': '1920x1080x30',
-        }.items(),
-    )
+    # realsense = IncludeLaunchDescription(
+    #     PythonLaunchDescriptionSource(
+    #         os.path.join(
+    #             get_package_share_directory('realsense2_camera'),
+    #             'launch',
+    #             'rs_launch.py',
+    #         )
+    #     ),
+    #     launch_arguments={
+    #         'pointcloud.enable': 'true',
+    #         'align_depth.enable': 'true',
+    #         'rgb_camera.color_profile': '1920x1080x30',
+    #         'depth_camera.depth_profile': '1920x1080x30',
+    #     }.items(),
+    # )
 
     moveit = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -53,7 +53,7 @@ def generate_launch_description():
     # needs an interactive TTY to read keypresses, so it is NOT in the launch.
     return LaunchDescription(
         [
-            realsense,
+            # realsense,
             Node(
                 package='tidyer',
                 executable='process_pointcloud',

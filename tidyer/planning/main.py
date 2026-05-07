@@ -156,6 +156,9 @@ class UR7e_CubeGrasp(Node):
         if self._overlap_check(pick) or self._overlap_check(place):
             self.get_logger().warn('Received pick/place pair too close to active location; ignoring.')
             return
+        
+        self.active_location.append(pick)
+        self.active_location.append(place)
 
         pre_pick = self._lift(pick, self.gripper_offset_m + self.approach_height_m)
         grasp_pick = self._lift(pick, self.gripper_offset_m - self.finger_insertion_m)
@@ -179,9 +182,6 @@ class UR7e_CubeGrasp(Node):
         if place_js is None:
             return
         
-        self.active_locations.append(pick)
-        self.active_locations.append(place)
-
         self.job_queue = [
             pre_pick_js,
             grasp_js,
@@ -193,6 +193,8 @@ class UR7e_CubeGrasp(Node):
             pre_place_js,
             self._default_joint_state(),
         ]
+        self.active_location.append(pick)
+        self.active_location.append(place)
         self.busy = True
         self.execute_jobs()
 
@@ -250,9 +252,9 @@ class UR7e_CubeGrasp(Node):
             self.get_logger().info('Cycle complete; back at observation pose. Press "c" for next.')
             self.busy = False
 
-            if self.active_locations:
+            if self.active_location:
                 self.get_logger().info('Clear active locations')
-                self.active_locations.clear()   
+                self.active_location.clear()   
             return
 
         self.get_logger().info(f'Executing job queue, {len(self.job_queue)} jobs remaining.')

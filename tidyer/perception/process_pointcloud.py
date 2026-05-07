@@ -630,10 +630,16 @@ class TidyerPerceptionNode(Node):
             return None
 
         dist = cv2.distanceTransform(free_mask, cv2.DIST_L2, 5)
-        _, max_dist, _, max_loc = cv2.minMaxLoc(dist)
-        if max_dist < required_radius:
+        # Among pixels that have enough clearance to fit the displaced block,
+        # pick the one closest to the displaced block's current centroid so the
+        # arm moves as little as possible.
+        candidates_v, candidates_u = np.where(dist >= required_radius)
+        if candidates_u.size == 0:
             return None
-        free_u, free_v = int(max_loc[0]), int(max_loc[1])
+        cu, cv_ = displaced.centroid_uv
+        d2 = (candidates_u - cu) ** 2 + (candidates_v - cv_) ** 2
+        idx = int(np.argmin(d2))
+        free_u, free_v = int(candidates_u[idx]), int(candidates_v[idx])
 
         # Reuse the displaced block's top z so the place pose lands the block
         # on the desk at the same height as where it was picked from.

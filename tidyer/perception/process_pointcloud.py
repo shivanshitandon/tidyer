@@ -219,13 +219,16 @@ class TidyerPerceptionNode(Node):
         msg.poses.append(self._make_pose(place_base, place.yaw_rad))
         self.pub_pair.publish(msg)
 
+        pair_subdir = self.pair_dir / f'pair_{ts}'
+        pair_subdir.mkdir(parents=True, exist_ok=True)
+
         pick_uv = pick.centroid_uv
         pick_vis = rgb_snap.copy()
         cv2.circle(pick_vis, pick_uv, 12, (0, 0, 255), 2)
         cv2.circle(pick_vis, pick_uv, 3, (0, 0, 255), -1)
         cv2.putText(pick_vis, 'PICK', (pick_uv[0] + 14, pick_uv[1] + 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        cv2.imwrite(str(self.pair_dir / f'curr_pick_{ts}.png'), pick_vis)
+        cv2.imwrite(str(pair_subdir / 'curr_pick.png'), pick_vis)
 
         place_uv = place.centroid_uv
         place_vis = self.reference_image.copy()
@@ -233,7 +236,24 @@ class TidyerPerceptionNode(Node):
         cv2.circle(place_vis, place_uv, 3, (0, 255, 0), -1)
         cv2.putText(place_vis, 'PLACE', (place_uv[0] + 14, place_uv[1] + 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.imwrite(str(self.pair_dir / f'ref_place_{ts}.png'), place_vis)
+        cv2.imwrite(str(pair_subdir / 'ref_place.png'), place_vis)
+
+        metadata = {
+            'timestamp': ts,
+            'color': pick.label,
+            'shape': pick.shape,
+            'pick': {
+                'pixel_uv': [int(pick_uv[0]), int(pick_uv[1])],
+                'xyz_base_m': [float(pick_base[0]), float(pick_base[1]), float(pick_base[2])],
+                'yaw_rad': float(pick.yaw_rad),
+            },
+            'place': {
+                'pixel_uv': [int(place_uv[0]), int(place_uv[1])],
+                'xyz_base_m': [float(place_base[0]), float(place_base[1]), float(place_base[2])],
+                'yaw_rad': float(place.yaw_rad),
+            },
+        }
+        (pair_subdir / 'pair.json').write_text(json.dumps(metadata, indent=2))
 
         response.success = True
         response.message = (

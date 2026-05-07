@@ -520,7 +520,7 @@ class TidyerPerceptionNode(Node):
         if depth_img is None:
             print("No depth image, cannot compute 3D position.")
             return None
-        if self.fx is None or self.fy is None or self.cx is None or self.cy is None: 
+        if self.fx is None or self.fy is None or self.cx is None or self.cy is None:
             print("Camera intrinsics not set, cannot compute 3D position.")
             return None
         if v < 0 or u < 0 or v >= depth_img.shape[0] or u >= depth_img.shape[1]:
@@ -532,18 +532,103 @@ class TidyerPerceptionNode(Node):
         cv2.drawContours(mask, [contour], -1, 255, thickness=-1)
         # Erode to stay clear of edges.
         mask = cv2.erode(mask, np.ones((5, 5), np.uint8), iterations=1) #if shadow, increase this value
-        depth_vals = depth_img[mask > 0]
-        depth_vals = depth_vals[depth_vals > 0]
+        ys_px, xs_px = np.where(mask > 0)
+        depth_vals = depth_img[ys_px, xs_px]
+        valid = depth_vals > 0
+        ys_px = ys_px[valid]
+        xs_px = xs_px[valid]
+        depth_vals = depth_vals[valid]
         if depth_vals.size == 0:
             print("No valid depth pixels in contour, cannot compute 3D position.")
             return None
 
-        # Block top is the *closest* (smallest depth) plateau inside the contour.
-        z_raw = float(np.percentile(depth_vals, 20))
-        z_m = z_raw / 1000.0 if depth_img.dtype == np.uint16 else z_raw
+        # RANSAC a plane through the in-contour 3D points (top plateau is the
+        # dominant inlier set; sloped sides + depth spikes get rejected). On
+        # failure, fall back to the 20th-percentile single-z estimate.
+        is_uint16 = depth_img.dtype == np.uint16
+        zs_m = depth_vals.astype(np.float32)
+        if is_uint16:
+            zs_m = zs_m / 1000.0
+        xs_m = (xs_px.astype(np.float32) - self.cx) * zs_m / self.fx
+        ys_m = (ys_px.astype(np.float32) - self.cy) * zs_m / self.fy
+        pts3 = np.column_stack([xs_m, ys_m, zs_m])
+
+        z_m = self._ransac_plane_z_at_pixel(pts3, u, v)
+        if z_m is None:
+            z_raw = float(np.percentile(depth_vals, 20))
+            z_m = z_raw / 1000.0 if is_uint16 else z_raw
         x_m = (u - self.cx) * z_m / self.fx
         y_m = (v - self.cy) * z_m / self.fy
         return (x_m, y_m, z_m)
+
+    def _ransac_plane_z_at_pixel(
+        self,
+        pts: np.ndarray,
+        u: int,
+        v: int,
+        inlier_thresh_m: float = 0.005,
+        iters: int = 80,
+        min_inliers: int = 20,
+    ) -> Optional[float]:
+        """Fit a plane to back-projected contour points via RANSAC and return
+        the Z (meters, camera frame) where the plane intersects the view ray
+        through pixel (u,v). Returns None if no plane has >= min_inliers."""
+        n = pts.shape[0]
+        if n < min_inliers:
+            return None
+        rng = np.random.default_rng(0)
+        best_inliers_count = 0
+        best_normal: Optional[np.ndarray] = None
+        best_d: Optional[float] = None
+        for _ in range(iters):
+            idx = rng.choice(n, size=3, replace=False)
+            p0, p1, p2 = pts[idx[0]], pts[idx[1]], pts[idx[2]]
+            normal = np.cross(p1 - p0, p2 - p0)
+            norm = float(np.linalg.norm(normal))
+            if norm < 1e-9:
+                continue
+            normal = normal / norm
+            d = float(np.dot(normal, p0))
+            dists = np.abs(pts @ normal - d)
+            count = int(np.sum(dists <= inlier_thresh_m))
+            if count > best_inliers_count:
+                best_inliers_count = count
+                best_normal = normal
+                best_d = d
+        if best_normal is None or best_inliers_count < min_inliers:
+            return None
+        # Refit on inliers (SVD of mean-centered points -> smallest singular vec).
+        inlier_mask = np.abs(pts @ best_normal - best_d) <= inlier_thresh_m
+        inliers = pts[inlier_mask]
+        centroid = inliers.mean(axis=0)
+        centered = inliers - centroid
+        try:
+            _, _, vh = np.linalg.svd(centered, full_matrices=False)
+        except np.linalg.LinAlgError:
+            return None
+        normal = vh[-1]
+        norm = float(np.linalg.norm(normal))
+        if norm < 1e-9:
+            return None
+        normal = normal / norm
+        d = float(np.dot(normal, centroid))
+        # Top-down camera: the block-top plane normal should have a sizeable Z
+        # component. If it doesn't, RANSAC likely locked onto a side surface.
+        if abs(normal[2]) < 0.3:
+            return None
+        # View ray for pixel (u,v): (X,Y,Z) = ((u-cx)/fx, (v-cy)/fy, 1) * Z.
+        # Plug into n·p = d and solve for Z.
+        denom = (
+            normal[0] * (u - self.cx) / self.fx
+            + normal[1] * (v - self.cy) / self.fy
+            + normal[2]
+        )
+        if abs(denom) < 1e-9:
+            return None
+        z = d / denom
+        if z <= 0.0:
+            return None
+        return float(z)
 
     def _camera_point_to_base(self, xyz_cam: Tuple[float, float, float]) -> Tuple[float, float, float]:
         pt = PointStamped()

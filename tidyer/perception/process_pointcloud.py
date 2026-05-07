@@ -63,6 +63,10 @@ class TidyerPerceptionNode(Node):
         self.declare_parameter('camera_optical_frame', 'camera_color_optical_frame')
         self.declare_parameter('min_contour_area_px', 800.0)
         self.declare_parameter('position_tolerance_px', 50.0)
+        # Yaw delta (rad) above which an in-place rotation still counts as
+        # moved. ~10 deg by default. Compared mod π since the long axis is
+        # bidirectional and yaw is wrapped to [-π/2, π/2).
+        self.declare_parameter('yaw_tolerance_rad', 0.175)
         self.declare_parameter('desk_plane_percentile', 50.0)
         self.declare_parameter('block_height_min_m', 0.005)
         self.declare_parameter('block_height_max_m', 0.15)
@@ -95,6 +99,7 @@ class TidyerPerceptionNode(Node):
         self.camera_optical_frame = self.get_parameter('camera_optical_frame').value
         self.min_contour_area_px = float(self.get_parameter('min_contour_area_px').value)
         self.position_tolerance_px = float(self.get_parameter('position_tolerance_px').value)
+        self.yaw_tolerance_rad = float(self.get_parameter('yaw_tolerance_rad').value)
         self.desk_plane_percentile = float(self.get_parameter('desk_plane_percentile').value)
         self.block_height_min_m = float(self.get_parameter('block_height_min_m').value)
         self.block_height_max_m = float(self.get_parameter('block_height_max_m').value)
@@ -196,8 +201,12 @@ class TidyerPerceptionNode(Node):
         current = self._segment_objects(rgb_snap, depth_snap)
         moved = self._find_moved_objects(current, self.reference_detections)
         if not moved:
+            final_path = self.pair_dir / 'final.png'
+            cv2.imwrite(str(final_path), rgb_snap)
             response.success = True
-            response.message = 'Scene aligned with reference (no moved blocks).'
+            response.message = (
+                f'Scene aligned with reference (no moved blocks); saved {final_path}.'
+            )
             self.get_logger().info(response.message)
             return response
 
@@ -219,7 +228,7 @@ class TidyerPerceptionNode(Node):
         # /capture_current trigger handle the originally-targeted move.
         displaced = False
         occupier = self._occupier_at_place(
-            place.centroid_uv, place.xyz_cam, current
+            place.centroid_uv, place.xyz_cam, current, exclude=pick
         )
         if occupier is not None:
             free = self._find_free_spot(occupier, current, depth_snap, rgb_snap.shape)
@@ -564,6 +573,7 @@ class TidyerPerceptionNode(Node):
         place_uv: Tuple[int, int],
         place_xyz_cam: Tuple[float, float, float],
         current_detections: List[Detection2D3D],
+        exclude: Optional[Detection2D3D] = None,
     ) -> Optional[Detection2D3D]:
         # A swap (vs. a stack) is detected when a current detection sits at
         # the reference place location on the same depth plane. Single-pixel
@@ -575,6 +585,8 @@ class TidyerPerceptionNode(Node):
         best = None
         best_dist = float('inf')
         for det in current_detections:
+            if det is exclude:
+                continue
             if det.contour is None or det.xyz_cam is None:
                 continue
             du = det.centroid_uv[0] - u
@@ -711,9 +723,24 @@ class TidyerPerceptionNode(Node):
             if best_idx is None:
                 continue
             used_curr_idx.add(best_idx)
-            if best_dist > self.position_tolerance_px:
-                moved.append((current[best_idx], ref))
+            cur_match = current[best_idx]
+            pos_moved = best_dist > self.position_tolerance_px
+            # Skip yaw on rotationally-symmetric shapes: _grasp_yaw bails to 0.0
+            # there, and the eigenvalue-ratio threshold can flip across runs and
+            # produce a phantom yaw delta.
+            yaw_moved = (
+                ref.shape not in ('square', 'circle')
+                and self._yaw_diff_pi(cur_match.yaw_rad, ref.yaw_rad)
+                > self.yaw_tolerance_rad
+            )
+            if pos_moved or yaw_moved:
+                moved.append((cur_match, ref))
         return moved
+
+    @staticmethod
+    def _yaw_diff_pi(a: float, b: float) -> float:
+        d = abs(a - b) % np.pi
+        return float(min(d, np.pi - d))
 
     def _update_block_states(self, detections: List[Detection2D3D]) -> None:
         now_s = self.get_clock().now().nanoseconds / 1e9

@@ -165,7 +165,7 @@ class UR7e_CubeGrasp(Node):
         out = Pose()
         out.position.x = pose.position.x
         out.position.y = pose.position.y
-        out.position.z = pose.position.z - dz
+        out.position.z = pose.position.z + dz
         out.orientation = pose.orientation
         return out
 

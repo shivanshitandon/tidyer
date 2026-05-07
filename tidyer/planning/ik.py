@@ -81,7 +81,7 @@ class IKPlanner(Node):
     # moveit_msgs/RobotTrajectory or None.
     # -----------------------------------------------------------
     def plan_to_joints(self, target_joint_state: JointState,
-                       planning_time_s: float = 5.0):
+                       planning_time_s: float = 20.0):
         if not self.plan_client.wait_for_service(timeout_sec=5.0):
             self.get_logger().error('/plan_kinematic_path service not available.')
             return None

@@ -261,6 +261,8 @@ class TidyerPerceptionNode(Node):
             response.message = f'TF failed: {exc}'
             return response
 
+        pick_base = (pick_base[0], pick_base[1] - 0.01, pick_base[2])
+
         msg = PoseArray()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.BASE_FRAME

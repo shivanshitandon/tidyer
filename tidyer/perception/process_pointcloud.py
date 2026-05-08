@@ -67,7 +67,6 @@ class TidyerPerceptionNode(Node):
         # moved. ~10 deg by default. Compared mod π since the long axis is
         # bidirectional and yaw is wrapped to [-π/2, π/2).
         self.declare_parameter('yaw_tolerance_rad', 0.175)
-        self.declare_parameter('desk_plane_percentile', 50.0)
         self.declare_parameter('block_height_min_m', 0.005)
         self.declare_parameter('block_height_max_m', 0.15)
         self.declare_parameter('track_match_distance_px', 65.0)
@@ -100,7 +99,6 @@ class TidyerPerceptionNode(Node):
         self.min_contour_area_px = float(self.get_parameter('min_contour_area_px').value)
         self.position_tolerance_px = float(self.get_parameter('position_tolerance_px').value)
         self.yaw_tolerance_rad = float(self.get_parameter('yaw_tolerance_rad').value)
-        self.desk_plane_percentile = float(self.get_parameter('desk_plane_percentile').value)
         self.block_height_min_m = float(self.get_parameter('block_height_min_m').value)
         self.block_height_max_m = float(self.get_parameter('block_height_max_m').value)
         self.track_match_distance_px = float(self.get_parameter('track_match_distance_px').value)
@@ -117,6 +115,8 @@ class TidyerPerceptionNode(Node):
         self.cy: Optional[float] = None
         self.latest_rgb: Optional[np.ndarray] = None
         self.latest_depth: Optional[np.ndarray] = None
+        self.desk_depth_m: Optional[float] = None
+        self.stacking_mode: bool = False
         self.reference_detections: List[Detection2D3D] = []
         self.reference_image: Optional[np.ndarray] = None
         self.block_states: Dict[str, BlockState] = {}
@@ -134,12 +134,16 @@ class TidyerPerceptionNode(Node):
 
         self.create_service(Trigger, '/capture_reference', self._on_capture_reference)
         self.create_service(Trigger, '/capture_current', self._on_capture_current)
+        self.create_service(Trigger, '/capture_desk_depth', self._on_capture_desk_depth)
+        self.create_service(Trigger, '/toggle_stacking', self._on_toggle_stacking)
 
         # Background tracker for state snapshot/debug; does not publish goals.
         self.create_timer(0.5, self._tracker_tick)
 
         self.get_logger().info(
-            'Tidyer perception ready. Trigger /capture_reference then /capture_current.'
+            'Tidyer perception ready. With a clean desk in view, trigger '
+            '/capture_desk_depth, then /capture_reference and /capture_current. '
+            'Use /toggle_stacking to switch between swap and stack modes.'
         )
 
     def _load_hsv_ranges(self) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
@@ -223,20 +227,25 @@ class TidyerPerceptionNode(Node):
             response.message = 'Missing depth for place point.'
             return response
 
-        # If something is already sitting at the place point (same depth plane,
-        # i.e. a swap rather than a stack), displace it first and let the next
-        # /capture_current trigger handle the originally-targeted move.
+        # If the reference place contour overlaps any current detection,
+        # displace one occupier this cycle (largest first) and let subsequent
+        # /capture_current calls clear the rest until the originally-targeted
+        # move can run unobstructed. Swap-only path; in stacking mode we expect
+        # the place contour to overlap the support block, so skip the check.
         displaced = False
-        occupier = self._occupier_at_place(
-            place.centroid_uv, place.xyz_cam, current, exclude=pick
-        )
-        if occupier is not None:
+        occupiers: List[Detection2D3D] = []
+        if not self.stacking_mode:
+            occupiers = self._occupiers_at_place_contour(
+                place, current, rgb_snap.shape, exclude=pick
+            )
+        if occupiers:
+            occupier = max(occupiers, key=lambda d: d.area_px)
             free = self._find_free_spot(occupier, current, depth_snap, rgb_snap.shape)
             if free is None:
                 response.success = False
                 response.message = (
-                    f'Place point {place.centroid_uv} occupied by '
-                    f'{occupier.label}/{occupier.shape}; no free spot found.'
+                    f'Place contour overlaps {len(occupiers)} block(s); no free '
+                    f'spot for {occupier.label}/{occupier.shape}.'
                 )
                 self.get_logger().warn(response.message)
                 return response
@@ -246,9 +255,9 @@ class TidyerPerceptionNode(Node):
                 response.message = 'Occupier missing depth; cannot displace.'
                 return response
             self.get_logger().info(
-                f'Place point {place.centroid_uv} occupied by '
-                f'{occupier.label}/{occupier.shape}; displacing to '
-                f'pixel ({free_u},{free_v}) before original move.'
+                f'Place contour overlaps {len(occupiers)} block(s); displacing '
+                f'{occupier.label}/{occupier.shape} to pixel ({free_u},{free_v}); '
+                f'{len(occupiers) - 1} remaining for next cycle.'
             )
             pick = occupier
             place = Detection2D3D(
@@ -351,11 +360,18 @@ class TidyerPerceptionNode(Node):
                 cv2.drawContours(bgr_vis, [contour], -1, (0, 255, 255), 2)
                 cv2.imshow('Segmentation', bgr_vis)
                 cv2.waitKey(1)
-                moments = cv2.moments(contour)
-                if moments['m00'] == 0:
-                    continue
-                u = int(moments['m10'] / moments['m00'])
-                v = int(moments['m01'] / moments['m00'])
+                # Centroid from the axis-aligned bounding box: shadows attached
+                # to the contour bias moment-based centroids, while the bbox
+                # extent is stabler frame-to-frame.
+                # moments = cv2.moments(contour)
+                # if moments['m00'] == 0:
+                #     continue
+                # u = int(moments['m10'] / moments['m00'])
+                # v = int(moments['m01'] / moments['m00'])
+                bx, by, bw, bh = cv2.boundingRect(contour)
+                u = bx + bw // 2
+                v = by + bh // 2
+                cv2.rectangle(bgr_vis, (bx, by), (bx + bw, by + bh), (255, 0, 0), 1)
                 cv2.circle(bgr_vis, (u, v), 4, (0, 0, 255), -1)
                 xyz = self._block_top_xyz_camera(contour, u, v, depth)
                 shape = self._classify_shape(contour, area)
@@ -385,19 +401,60 @@ class TidyerPerceptionNode(Node):
         cv2.waitKey(1)
         return detections
 
+    def _on_toggle_stacking(self, request, response):
+        """Flip stacking mode. When on, /capture_current skips the
+        contour-overlap displacement step so a block can be placed on top
+        of an existing one."""
+        self.stacking_mode = not self.stacking_mode
+        response.success = True
+        response.message = (
+            f'Stacking mode {"ON" if self.stacking_mode else "OFF"}.'
+        )
+        self.get_logger().info(response.message)
+        return response
+
+    def _on_capture_desk_depth(self, request, response):
+        """Snapshot a clean-desk depth frame and store the desk plane depth.
+
+        The caller is responsible for clearing the desk first; with no blocks
+        present, the median of the valid depth values gives the desk plane
+        depth in meters.
+        """
+        depth = self.latest_depth
+        if depth is None:
+            response.success = False
+            response.message = 'No depth frame available.'
+            self.get_logger().warn(response.message)
+            return response
+        depth_m = depth.astype(np.float32)
+        if depth.dtype == np.uint16:
+            depth_m = depth_m / 1000.0
+        valid = depth_m > 0.0
+        sample = depth_m[valid]
+        if sample.size < 200:
+            response.success = False
+            response.message = f'Too few valid depth pixels ({sample.size}).'
+            self.get_logger().warn(response.message)
+            return response
+        self.desk_depth_m = float(np.median(sample))
+        response.success = True
+        response.message = (
+            f'Desk depth captured: {self.desk_depth_m:.4f} m '
+            f'(median over {sample.size} valid pixels).'
+        )
+        self.get_logger().info(response.message)
+        return response
+
     def _compute_desk_block_mask(self, depth_img: Optional[np.ndarray]) -> Optional[np.ndarray]:
         if depth_img is None:
+            return None
+        if self.desk_depth_m is None:
             return None
         depth_m = depth_img.astype(np.float32)
         if depth_img.dtype == np.uint16:
             depth_m = depth_m / 1000.0
 
-        valid = depth_m > 0.0
-        sample = depth_m[valid]
-        if sample.size < 200:
-            return None
-        desk_depth = float(np.percentile(sample, self.desk_plane_percentile))
-
+        desk_depth = self.desk_depth_m
         # Keep points slightly above the desk plane where blocks usually sit.
         block_band = np.logical_and(
             depth_m >= max(0.0, desk_depth - self.block_height_max_m),
@@ -653,39 +710,38 @@ class TidyerPerceptionNode(Node):
             return None
         return float(z_raw) / 1000.0 if depth_img.dtype == np.uint16 else float(z_raw)
 
-    def _occupier_at_place(
+    def _occupiers_at_place_contour(
         self,
-        place_uv: Tuple[int, int],
-        place_xyz_cam: Tuple[float, float, float],
+        place_det: Detection2D3D,
         current_detections: List[Detection2D3D],
+        image_shape: Tuple[int, ...],
         exclude: Optional[Detection2D3D] = None,
-    ) -> Optional[Detection2D3D]:
-        # A swap (vs. a stack) is detected when a current detection sits at
-        # the reference place location on the same depth plane. Single-pixel
-        # depth/contour tests at place_uv are fragile (centroids jitter, edges
-        # leak depth), so accept any detection whose centroid is within
-        # position_tolerance_px OR whose contour contains place_uv, then verify
-        # using the detection's contour-sampled top-z.
-        u, v = place_uv
-        best = None
-        best_dist = float('inf')
+    ) -> List[Detection2D3D]:
+        # Reference place contour, dilated by overlap_margin_px to aoccbsorb
+        # placement jitter, defines the XY footprint that must be clear before
+        # the held block can be set down. Any current detection whose filled
+        # contour intersects that footprint at one pixel or more is returned
+        # as an occupier; a single shared pixel is enough — no minimum-area
+        # threshold. Pure 2D swap test; stacking is handled separately.
+        if place_det.contour is None:
+            return []
+
+        h, w = image_shape[:2]
+        place_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.drawContours(place_mask, [place_det.contour], -1, 255, thickness=-1)
+        if self.overlap_margin_px > 0:
+            k = 2 * self.overlap_margin_px + 1
+            place_mask = cv2.dilate(place_mask, np.ones((k, k), np.uint8))
+
+        out: List[Detection2D3D] = []
         for det in current_detections:
-            if det is exclude:
+            if det is exclude or det.contour is None:
                 continue
-            if det.contour is None or det.xyz_cam is None:
-                continue
-            du = det.centroid_uv[0] - u
-            dv = det.centroid_uv[1] - v
-            dist = float(np.hypot(du, dv))
-            contains = cv2.pointPolygonTest(det.contour, (float(u), float(v)), False) >= 0
-            if not contains and dist > self.position_tolerance_px:
-                continue
-            if abs(det.xyz_cam[2] - place_xyz_cam[2]) > self.place_occupied_depth_thresh_m:
-                continue
-            if dist < best_dist:
-                best_dist = dist
-                best = det
-        return best
+            det_mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.drawContours(det_mask, [det.contour], -1, 255, thickness=-1)
+            if cv2.countNonZero(cv2.bitwise_and(place_mask, det_mask)) > 0:
+                out.append(det)
+        return out
 
     def _find_free_spot(
         self,
@@ -714,19 +770,17 @@ class TidyerPerceptionNode(Node):
         # Restrict candidates to actual desk plane: valid depth, deeper than the
         # block-top band (i.e. the bare desk surface).
         desk_only = np.zeros((h, w), dtype=np.uint8)
-        if depth_img is not None:
+        if depth_img is not None and self.desk_depth_m is not None:
             depth_m = depth_img.astype(np.float32)
             if depth_img.dtype == np.uint16:
                 depth_m /= 1000.0
             valid = depth_m > 0.0
-            sample = depth_m[valid]
-            if sample.size >= 200:
-                desk_depth = float(np.percentile(sample, self.desk_plane_percentile))
-                near_desk = np.logical_and(
-                    valid,
-                    depth_m >= desk_depth - self.block_height_min_m,
-                )
-                desk_only = (near_desk.astype(np.uint8)) * 255
+            desk_depth = self.desk_depth_m
+            near_desk = np.logical_and(
+                valid,
+                depth_m >= desk_depth - self.block_height_min_m,
+            )
+            desk_only = (near_desk.astype(np.uint8)) * 255
 
         free_mask = cv2.bitwise_and(desk_only, cv2.bitwise_not(occupied))
         if cv2.countNonZero(free_mask) == 0:

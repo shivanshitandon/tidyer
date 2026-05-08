@@ -80,8 +80,8 @@ class TidyerPerceptionNode(Node):
         # Wrist Z lift (meters) added in base_link before publishing. Positive
         # values stop the gripper higher above the surface to avoid collisions;
         # the gripper opens/closes at the lifted z.
-        self.declare_parameter('pick_z_offset_m', 0.025)
-        self.declare_parameter('place_z_offset_m', 0.025)
+        self.declare_parameter('pick_z_offset_m', 0.0) #0.025
+        self.declare_parameter('place_z_offset_m', 0.0) #0.025
 
         # HSV config by label: [[h_lo,s_lo,v_lo],[h_hi,s_hi,v_hi]]
         self.declare_parameter(

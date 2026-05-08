@@ -809,11 +809,11 @@ class TidyerPerceptionNode(Node):
         if not np.any(qualifying):
             return None
         ys, xs = np.where(qualifying)
-        # Pick the qualifying pixel closest to the displaced block's current
-        # centroid so it gets nudged the minimum distance, instead of being
-        # flung to the geometric center of the largest free region.
-        cu, cv_ = displaced.centroid_uv
-        idx = int(np.argmin((xs - cu) ** 2 + (ys - cv_) ** 2))
+        # Park in the most isolated free pixel (max clearance to any occupier).
+        # Minimizing the nudge packed the first displacement next to the
+        # cluster and starved chained displacements of room; biasing toward
+        # open desk leaves the near-cluster pockets free for the next cycle.
+        idx = int(np.argmax(dist[ys, xs]))
         free_u, free_v = int(xs[idx]), int(ys[idx])
 
         # Reuse the displaced block's top z so the place pose lands the block

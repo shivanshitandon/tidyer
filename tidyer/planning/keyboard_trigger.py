@@ -10,8 +10,10 @@ from std_srvs.srv import Trigger
 
 HELP = (
     "\nTidyer keyboard trigger\n"
+    "  d : capture DESK DEPTH (clear desk first; saves desk plane depth)\n"
     "  r : capture REFERENCE image (target scene)\n"
     "  c : capture CURRENT image (publish next pick/place pair)\n"
+    "  s : toggle STACKING mode (skip displacement on contour overlap)\n"
     "  q : quit\n"
 )
 
@@ -21,6 +23,8 @@ class KeyboardTrigger(Node):
         super().__init__('tidyer_keyboard_trigger')
         self.cli_ref = self.create_client(Trigger, '/capture_reference')
         self.cli_cur = self.create_client(Trigger, '/capture_current')
+        self.cli_desk = self.create_client(Trigger, '/capture_desk_depth')
+        self.cli_stack = self.create_client(Trigger, '/toggle_stacking')
         self.get_logger().info(HELP)
 
     def call(self, client, name: str) -> None:
@@ -55,10 +59,14 @@ def main(args=None):
             if not key:
                 rclpy.spin_once(node, timeout_sec=0.0)
                 continue
-            if key == 'r':
+            if key == 'd':
+                node.call(node.cli_desk, '/capture_desk_depth')
+            elif key == 'r':
                 node.call(node.cli_ref, '/capture_reference')
             elif key == 'c':
                 node.call(node.cli_cur, '/capture_current')
+            elif key == 's':
+                node.call(node.cli_stack, '/toggle_stacking')
             elif key == 'q':
                 break
             else:

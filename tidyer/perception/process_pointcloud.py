@@ -279,7 +279,8 @@ class TidyerPerceptionNode(Node):
             response.message = f'TF failed: {exc}'
             return response
 
-        pick_base = (pick_base[0], pick_base[1] - 0.01, pick_base[2])
+        # This is us trying to nudge the gripper a tiny bit to the left to 
+        # pick_base = (pick_base[0], pick_base[1], pick_base[2])
 
         msg = PoseArray()
         msg.header.stamp = self.get_clock().now().to_msg()

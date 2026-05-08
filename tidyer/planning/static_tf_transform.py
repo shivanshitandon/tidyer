@@ -13,7 +13,7 @@ def main():
     t.child_frame_id = 'camera_color_optical_frame'
     t.transform.translation.x = -0.04
     t.transform.translation.y = 0.13
-    t.transform.translation.z = -0.040 #-0.025 walle
+    t.transform.translation.z = -0.027 #-0.025 walle
 
     def tick():
         t.header.stamp = node.get_clock().now().to_msg()

@@ -174,7 +174,7 @@ class UR7e_CubeGrasp(Node):
         pre_pick = self._lift(pick, self.gripper_offset_m + self.approach_height_m)
         grasp_pick = self._lift(pick, self.gripper_offset_m - self.finger_insertion_m)
         pre_place = self._lift(place, self.gripper_offset_m + self.approach_height_m)
-        place_pose = self._lift(place, self.gripper_offset_m - self.finger_insertion_m + 0.0025) #-0.02
+        place_pose = self._lift(place, self.gripper_offset_m - self.finger_insertion_m + 0.0025) #-0.02 please work
 
         # Run IK for every waypoint up front, seed-chained: each call uses the
         # previous IK result as its seed so the planner stays on a consistent

@@ -75,12 +75,13 @@ class TidyerPerceptionNode(Node):
         # ~block_height closer to the camera than the reference top) does NOT
         # match — only same-layer swaps trigger displacement.
         self.declare_parameter('place_occupied_depth_thresh_m', 0.02)
-        self.declare_parameter('free_spot_margin_px', 20)
+        self.declare_parameter('free_spot_margin_px', 25)
+        self.declare_parameter('overlap_margin_px', 5)
         # Wrist Z lift (meters) added in base_link before publishing. Positive
         # values stop the gripper higher above the surface to avoid collisions;
         # the gripper opens/closes at the lifted z.
-        self.declare_parameter('pick_z_offset_m', 0.005)
-        self.declare_parameter('place_z_offset_m', 0.005)
+        self.declare_parameter('pick_z_offset_m', 0.025)
+        self.declare_parameter('place_z_offset_m', 0.025)
 
         # HSV config by label: [[h_lo,s_lo,v_lo],[h_hi,s_hi,v_hi]]
         self.declare_parameter(
@@ -112,6 +113,7 @@ class TidyerPerceptionNode(Node):
             self.get_parameter('place_occupied_depth_thresh_m').value
         )
         self.free_spot_margin_px = int(self.get_parameter('free_spot_margin_px').value)
+        self.overlap_margin_px = int(self.get_parameter('overlap_margin_px').value)
         self.pick_z_offset_m = float(self.get_parameter('pick_z_offset_m').value)
         self.place_z_offset_m = float(self.get_parameter('place_z_offset_m').value)
         self.hsv_ranges: Dict[str, Tuple[np.ndarray, np.ndarray]] = self._load_hsv_ranges()

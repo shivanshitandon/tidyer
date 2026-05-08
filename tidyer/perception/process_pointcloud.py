@@ -75,7 +75,7 @@ class TidyerPerceptionNode(Node):
         # ~block_height closer to the camera than the reference top) does NOT
         # match — only same-layer swaps trigger displacement.
         self.declare_parameter('place_occupied_depth_thresh_m', 0.02)
-        self.declare_parameter('free_spot_margin_px', 23)
+        self.declare_parameter('free_spot_margin_px', 20)
         self.declare_parameter('overlap_margin_px', 5)
         # Wrist Z lift (meters) added in base_link before publishing. Positive
         # values stop the gripper higher above the surface to avoid collisions;

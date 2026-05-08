@@ -60,14 +60,62 @@ class UR7e_CubeGrasp(Node):
             '/scaled_joint_trajectory_controller/follow_joint_trajectory',
         )
         self.gripper_cli = self.create_client(Trigger, '/toggle_gripper')
+        self.capture_cur_cli = self.create_client(Trigger, '/capture_current')
+
+        self.create_service(Trigger, '/arm_auto_capture_chain', self._on_arm_auto_capture_chain)
+        self.create_service(Trigger, '/disarm_auto_capture_chain', self._on_disarm_auto_capture_chain)
 
         self.joint_state: Optional[JointState] = None
         self.ik_planner = IKPlanner()
 
         self.job_queue: List[Job] = []
         self.busy: bool = False
+        self.auto_capture_chain: bool = False
 
         self._startup_timer = self.create_timer(0.1, self._startup_move)
+
+    def _on_arm_auto_capture_chain(self, request, response):
+        self.auto_capture_chain = True
+        response.success = True
+        response.message = 'Auto capture chain armed.'
+        return response
+
+    def _on_disarm_auto_capture_chain(self, request, response):
+        self.auto_capture_chain = False
+        response.success = True
+        response.message = 'Auto capture chain disarmed.'
+        return response
+
+    def _stop_auto_capture_chain(self, reason: str) -> None:
+        if not self.auto_capture_chain:
+            return
+        self.auto_capture_chain = False
+        self.get_logger().info(f'Auto capture chain stopped: {reason}')
+
+    def _schedule_followup_capture_after_cycle(self) -> None:
+        if not self.auto_capture_chain:
+            return
+        if not self.capture_cur_cli.wait_for_service(timeout_sec=2.0):
+            self._stop_auto_capture_chain('/capture_current not available.')
+            return
+        fut = self.capture_cur_cli.call_async(Trigger.Request())
+        fut.add_done_callback(self._on_followup_capture_done)
+
+    def _on_followup_capture_done(self, future) -> None:
+        if not self.auto_capture_chain:
+            return
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._stop_auto_capture_chain(f'capture_current error: {exc}')
+            return
+        if not response.success:
+            self._stop_auto_capture_chain(response.message)
+            return
+        if 'Scene aligned with reference' in response.message:
+            self.get_logger().info(response.message)
+            self.auto_capture_chain = False
+            return
 
     @staticmethod
     def _default_joint_state() -> JointState:
@@ -113,9 +161,11 @@ class UR7e_CubeGrasp(Node):
             return
         if self.joint_state is None:
             self.get_logger().warn('No joint state yet; cannot proceed.')
+            self._stop_auto_capture_chain('no joint state.')
             return
         if len(msg.poses) < 2:
             self.get_logger().error(f'Expected 2 poses (pick, place), got {len(msg.poses)}.')
+            self._stop_auto_capture_chain('invalid PoseArray.')
             return
 
         pick = msg.poses[0]
@@ -132,15 +182,19 @@ class UR7e_CubeGrasp(Node):
         # the two yaws differ).
         pre_pick_js = self._ik_or_abort(self.joint_state, pre_pick, 'pre-pick')
         if pre_pick_js is None:
+            self._stop_auto_capture_chain('IK failed at pre-pick.')
             return
         grasp_js = self._ik_or_abort(pre_pick_js, grasp_pick, 'grasp')
         if grasp_js is None:
+            self._stop_auto_capture_chain('IK failed at grasp.')
             return
         pre_place_js = self._ik_or_abort(grasp_js, pre_place, 'pre-place')
         if pre_place_js is None:
+            self._stop_auto_capture_chain('IK failed at pre-place.')
             return
         place_js = self._ik_or_abort(pre_place_js, place_pose, 'place')
         if place_js is None:
+            self._stop_auto_capture_chain('IK failed at place.')
             return
 
         self.job_queue = [
@@ -183,10 +237,16 @@ class UR7e_CubeGrasp(Node):
             # commanded a near-home but not-home state). Re-issue if needed.
             if self._at_default_pose():
                 self._default_pose_retries = 0
-                self.get_logger().info(
-                    'Cycle complete; verified at default pose. Press "c" for next.'
-                )
+                if self.auto_capture_chain:
+                    self.get_logger().info(
+                        'Cycle complete; verified at default pose. Scheduling next capture.'
+                    )
+                else:
+                    self.get_logger().info(
+                        'Cycle complete; verified at default pose. Press "c" for next.'
+                    )
                 self.busy = False
+                self._schedule_followup_capture_after_cycle()
                 return
             if self._default_pose_retries >= self.default_pose_max_retries:
                 self.get_logger().error(
@@ -195,6 +255,7 @@ class UR7e_CubeGrasp(Node):
                 )
                 self._default_pose_retries = 0
                 self.busy = False
+                self._stop_auto_capture_chain('default pose retries exhausted.')
                 return
             self._default_pose_retries += 1
             self.get_logger().warn(
@@ -221,6 +282,7 @@ class UR7e_CubeGrasp(Node):
             self.get_logger().error('Joint plan failed; aborting cycle.')
             self.job_queue.clear()
             self.busy = False
+            self._stop_auto_capture_chain('joint plan failed.')
             return
         self._execute_joint_trajectory(traj.joint_trajectory)
 
@@ -231,6 +293,7 @@ class UR7e_CubeGrasp(Node):
             )
             self.job_queue.clear()
             self.busy = False
+            self._stop_auto_capture_chain('gripper service unavailable.')
             return
         future = self.gripper_cli.call_async(Trigger.Request())
         rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
@@ -238,6 +301,7 @@ class UR7e_CubeGrasp(Node):
             self.get_logger().error('Gripper service call timed out; aborting cycle.')
             self.job_queue.clear()
             self.busy = False
+            self._stop_auto_capture_chain('gripper service timed out.')
             return
         self.get_logger().info('Gripper toggled.')
         self.execute_jobs()
@@ -251,6 +315,7 @@ class UR7e_CubeGrasp(Node):
             )
             self.job_queue.clear()
             self.busy = False
+            self._stop_auto_capture_chain('controller action server unavailable.')
             return
 
         goal = FollowJointTrajectory.Goal()
@@ -266,11 +331,13 @@ class UR7e_CubeGrasp(Node):
             self.get_logger().error(f'send_goal failed: {exc}')
             self.job_queue.clear()
             self.busy = False
+            self._stop_auto_capture_chain(f'send_goal failed: {exc}')
             return
         if goal_handle is None or not goal_handle.accepted:
             self.get_logger().error('Trajectory goal rejected.')
             self.job_queue.clear()
             self.busy = False
+            self._stop_auto_capture_chain('trajectory goal rejected.')
             return
         self.get_logger().info('Executing trajectory...')
         result_future = goal_handle.get_result_async()
@@ -285,6 +352,7 @@ class UR7e_CubeGrasp(Node):
             self.get_logger().error(f'Trajectory execution failed: {exc}')
             self.job_queue.clear()
             self.busy = False
+            self._stop_auto_capture_chain(f'trajectory execution failed: {exc}')
 
 
 def main(args=None):

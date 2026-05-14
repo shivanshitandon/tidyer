@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tidyer — EECS 106A Final Report</title>
+  <link rel="stylesheet" href="assets/style.css" />
+  <!--
+    GitHub Pages: Repository → Settings → Pages → Build and deployment
+    → Source: Deploy from a branch → Branch: main (or default) → Folder: /docs
+    Site URL will be https://<user>.github.io/tidyer/ unless you use a custom domain.
+  -->
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <h1>Tidyer</h1>
+      <p class="tag">EECS 106A final project report · ROS 2 · UR manipulator · Intel RealSense</p>
+      <nav class="toc" aria-label="Sections">
+        <a href="#intro">Introduction</a>
+        <a href="#design">Design</a>
+        <a href="#implementation">Implementation</a>
+        <a href="#results">Results</a>
+        <a href="#conclusion">Conclusion</a>
+        <a href="#team">Team</a>
+        <a href="#extra">Additional materials</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section id="intro">
+      <h2>1. Introduction</h2>
+
+      <h3>(a) End goal</h3>
+      <p>
+        <strong>Tidyer</strong> is a tabletop manipulation system that perceives cluttered objects with a depth
+        camera, reasons about grasps and arm motion, and uses a UR-series robot arm (via MoveIt) to pick and
+        place items. The end goal is reliable, repeatable tidy-up behavior suitable for a lab demo and future
+        extension to more complex scenes.
+      </p>
+
+      <h3>(b) Why this project is interesting</h3>
+      <p>
+        Tabletop tidying combines perception, planning, and control under real sensor noise, calibration error,
+        and limited compute. Interesting problems include: segmenting and localizing objects in dense RGB-D
+        data, producing stable pick poses, coordinating gripper timing with motion, and keeping the software
+        stack modular enough to iterate quickly during integration weeks.
+      </p>
+
+      <h3>(c) Real-world applications</h3>
+      <p>
+        Similar pipelines appear in warehouse piece picking, kitting cells, assistive robots that clear
+        surfaces, recycling sort lines, and light assembly where cameras replace fixturing. The same
+        building blocks—3D perception, motion planning, and guarded execution—transfer directly to those domains.
+      </p>
+    </section>
+
+    <section id="design">
+      <h2>2. Design</h2>
+
+      <h3>(a) Design criteria and desired functionality</h3>
+      <ul>
+        <li>Perceive the workspace from a fixed camera mount and publish actionable geometry to the planner.</li>
+        <li>Plan collision-aware arm trajectories using the standard UR + MoveIt stack.</li>
+        <li>Execute pick–place sequences with a controllable gripper and safe shutdown if a node exits.</li>
+        <li>Remain debuggable: separate nodes for perception, transforms, and manipulation; keyboard trigger in its own process.</li>
+      </ul>
+
+      <h3>(b) Architecture we chose</h3>
+      <p>
+        A ROS&nbsp;2 <code>ament_python</code> package (<code>tidyer</code>) hosts perception and planning nodes.
+        Bring-up is centralized in a single launch file that starts RealSense (point cloud + aligned depth),
+        perception, static transforms, the pick–place executor, and MoveIt. Interactive input runs in a
+        separate terminal so it retains a TTY.
+      </p>
+
+      <h3>(c) Design choices and trade-offs</h3>
+      <ul>
+        <li><strong>RGB-D + point cloud</strong> vs. contact or fiducials: richer scene understanding at the cost of tuning and lighting sensitivity.</li>
+        <li><strong>MoveIt / UR defaults</strong> vs. custom controllers: faster integration vs. less low-level control.</li>
+        <li><strong>Modular nodes</strong> vs. one monolithic process: clearer failure modes but more timing and message contracts to maintain.</li>
+      </ul>
+
+      <h3>(d) Impact on robustness, durability, and efficiency</h3>
+      <p>
+        Perception-heavy designs trade robustness to occlusion and reflectivity for hardware simplicity (no
+        part-specific nests). MoveIt-based motion improves safety and repeatability in structured cells.
+        Multi-node ROS graphs add latency and integration overhead but improve testability and team parallelization—important for a short course timeline.
+      </p>
+    </section>
+
+    <section id="implementation">
+      <h2>3. Implementation</h2>
+
+      <h3>(a) Hardware</h3>
+      <figure class="figure">
+        <img src="assets/placeholder.svg" alt="Hardware photo placeholder" width="800" height="450" />
+        <figcaption>Replace with labeled photos of the arm, camera mount, gripper, and workspace (drop files under <code>docs/assets/</code> and update <code>src</code>).</figcaption>
+      </figure>
+      <p>
+        Primary hardware: UR manipulator (MoveIt config targets UR7e by default), Intel RealSense depth camera
+        with point cloud streaming enabled, and robot-mounted or fixed-overhead camera mounting as built in your lab setup.
+        Add wiring photos and a frame diagram when ready.
+      </p>
+
+      <h3>(b) Parts list</h3>
+      <ul>
+        <li>UR collaborative arm and controller (ROS 2 driver / MoveIt integration).</li>
+        <li>Intel RealSense (RGB + depth, aligned depth, point cloud).</li>
+        <li>Gripper with a simple binary open/close service (as wired in software).</li>
+        <li>Table, fixturing, and any 3D-printed or machined brackets—document with CAD links in section 7.</li>
+      </ul>
+
+      <h3>(c) Software</h3>
+      <p>
+        Key modules in this repository:
+      </p>
+      <ul>
+        <li><code>tidyer/perception/process_pointcloud.py</code> — depth / point cloud processing pipeline.</li>
+        <li><code>tidyer/planning/main.py</code> — pick–place node: IK planning, trajectory execution, gripper services, job queue.</li>
+        <li><code>tidyer/planning/ik.py</code> — inverse kinematics helper used by the planner.</li>
+        <li><code>tidyer/planning/static_tf_transform.py</code> — static transforms for consistent frames.</li>
+        <li><code>tidyer/planning/keyboard_trigger.py</code> — interactive triggers (run separately from launch).</li>
+        <li><code>launch/tidyer_bringup.launch.py</code> — starts RealSense, perception, TF, pick–place, and MoveIt; global shutdown if any launched process exits.</li>
+      </ul>
+      <figure class="figure">
+        <img src="assets/placeholder.svg" alt="Software diagram placeholder" width="800" height="450" />
+        <figcaption>Optional: replace with a block diagram (nodes/topics) exported from your slides or draw.io.</figcaption>
+      </figure>
+
+      <h3>(d) End-to-end system flow</h3>
+      <pre class="flow">
+Launch (tidyer_bringup.launch.py)
+  ├─ RealSense (point cloud + aligned depth)
+  ├─ process_pointcloud  →  perception outputs (topics TBD in your write-up)
+  ├─ tidyer_tf           →  static / supporting transforms
+  ├─ tidyer_pick_place   →  subscribes to pick pairs, plans/executes trajectories, gripper
+  └─ MoveIt (UR)         →  planning scene, RViz optional
+
+Separate terminal: ros2 run tidyer tidyer_keyboard  (interactive TTY)
+      </pre>
+      <p>
+        Flesh out exact topic names, services, and message types when you freeze the interface for the report.
+      </p>
+    </section>
+
+    <section id="results">
+      <h2>4. Results</h2>
+
+      <h3>(a) Performance summary</h3>
+      <p>
+        <em>[Draft]</em> Summarize which tasks succeeded (e.g., single-object pick, multi-object tidy run, failure modes).
+        Include quantitative notes if you collected timing or success counts.
+      </p>
+
+      <figure class="figure">
+        <img src="assets/placeholder.svg" alt="Results image placeholder" width="800" height="450" />
+        <figcaption>Replace with screenshots or stills from your best runs.</figcaption>
+      </figure>
+
+      <h3>(b) Video</h3>
+      <figure class="figure">
+        <div class="video-shell">
+          <div>
+            <strong>Video placeholder</strong>
+            After you upload to YouTube (or similar), paste an embed here, for example:
+            <br /><br />
+            <code>&lt;iframe src="https://www.youtube.com/embed/VIDEO_ID" title="demo" allowfullscreen&gt;&lt;/iframe&gt;</code>
+            <br /><br />
+            Or link: <a href="#">Add your public video URL</a>
+          </div>
+        </div>
+        <figcaption>Course requirement: describe purpose on camera and show the system in action.</figcaption>
+      </figure>
+    </section>
+
+    <section id="conclusion">
+      <h2>5. Conclusion</h2>
+
+      <h3>(a) Results vs. design criteria</h3>
+      <p><em>[Draft]</em> Map each design criterion from §2a to what you observed in §4.</p>
+
+      <h3>(b) Difficulties</h3>
+      <p><em>[Draft]</em> Calibration, segmentation stability, timing with MoveIt, lab hardware, etc.</p>
+
+      <h3>(c) Flaws, hacks, and future work</h3>
+      <p><em>[Draft]</em> List honest limitations (assumptions, tuned constants, demo-only shortcuts) and the next engineering steps you would take with more time.</p>
+    </section>
+
+    <section id="team">
+      <h2>6. Team</h2>
+      <div class="team-grid">
+        <article class="card">
+          <h4>Team member 1</h4>
+          <p>Short bio and major contributions (perception, planning, hardware, integration, report, video).</p>
+        </article>
+        <article class="card">
+          <h4>Team member 2</h4>
+          <p>Edit this card in <code>docs/index.html</code>.</p>
+        </article>
+        <article class="card">
+          <h4>Team member 3</h4>
+          <p>Add or remove cards to match your roster.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="extra">
+      <h2>7. Additional materials</h2>
+      <ul>
+        <li><a href="https://github.com/shivanshitandon/tidyer">GitHub repository</a> — code, launch files, and package manifest (<code>package.xml</code>).</li>
+        <li>CAD / mechanical drawings — add links when hosted (Onshape, Drive, etc.).</li>
+        <li>Component datasheets — RealSense, UR, gripper, power supplies.</li>
+        <li>Extra media — link playlists or folders of raw logs and images.</li>
+      </ul>
+
+      <div class="callout">
+        <strong>Repository note (integration)</strong><br />
+        We reviewed all remote branches by last commit date and lineage. The <code>demo</code> branch was the newest
+        line at integration time (latest commit: <em>welp its the best it can be</em>) and was kept in sync with
+        <code>origin/demo</code>. <code>main</code> and <code>demo</code> have diverged; document which branch you grade or
+        demo from in your submission text if both exist.
+      </div>
+    </section>
+  </main>
+
+  <footer class="site">
+    EECS 106A · Tidyer · Static site in <code>/docs</code> for GitHub Pages
+  </footer>
+</body>
+</html>

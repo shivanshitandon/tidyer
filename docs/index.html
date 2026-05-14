@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tidyer — EECS 106A Final Report</title>
   <link rel="stylesheet" href="assets/style.css" />
+  <link rel="icon" type="image/x-icon" href="/assets/robot-icon.png">
   <!--
     GitHub Pages: Repository → Settings → Pages → Build and deployment
     → Source: Deploy from a branch → Branch: main (or default) → Folder: /docs
@@ -125,7 +126,7 @@
         <li><code>launch/tidyer_bringup.launch.py</code> — starts RealSense, perception, TF, pick–place, and MoveIt; global shutdown if any launched process exits.</li>
       </ul>
       <figure class="figure">
-        <img src="assets/placeholder.svg" alt="Software diagram placeholder" width="800" height="450" />
+        <img src="assets/software-algorithm.png" alt="Software diagram" width="800" height="450" />
         <figcaption>Optional: replace with a block diagram (nodes/topics) exported from your slides or draw.io.</figcaption>
       </figure>
 
@@ -196,8 +197,16 @@ Separate terminal: ros2 run tidyer tidyer_keyboard  (interactive TTY)
       <p><em>[Draft]</em> Map each design criterion from §2a to what you observed in §4.</p>
 
       <h3>(b) Difficulties</h3>
-      <p><em>[Draft]</em> Calibration, segmentation stability, timing with MoveIt, lab hardware, etc.</p>
-
+      <p>There were several challenges we encountered in both the hardware and software.</p>
+      <ul>
+        <li><strong>TF Tree Issue:</strong> We encountered several challenges throughout our project, including a disconnected TF tree between the base_link and camera frames that blocked necessary pose transformations.</li>
+        <li><strong>Planner Failures:</strong> We experienced frequent planner failures and timeouts, particularly when the target was far away or the environment was heavily cluttered.</li>
+        <li><strong>Perception Sensitivity:</strong> Our perception system showed high sensitivity, as HSV thresholds drifted under changing lighting conditions, which affected segmentation accuracy.</li>
+        <li><strong>Grasp/Place Issues:</strong> Excessive noise in centroid and depth data negatively impacted our grasp and place accuracy.</li>
+        <li><strong>Robot Protection Stops:</strong> The UR robot frequently entered a protective stop, caused by compounding errors in depth/pose estimation combined with overly aggressive grasping and approach tuning in certain code branches. </li>
+        <li><strong>Table Alignment:</strong> The table was not perfectly straight, introducing consistent calibration errors. </li>
+        <li><strong>Camera Discrepancy:</strong> We noted a significant discrepancy between the optimal camera placement and the actual depth data received from the PyRealSense camera. </li>
+      </ul>
       <h3>(c) Flaws, hacks, and future work</h3>
       <p><em>[Draft]</em> List honest limitations (assumptions, tuned constants, demo-only shortcuts) and the next engineering steps you would take with more time.</p>
     </section>

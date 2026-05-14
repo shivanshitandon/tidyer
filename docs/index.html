@@ -200,7 +200,19 @@ Optional speed scaling (example):
       </figure>
 
       <h3>(b) 3D implementation</h3>
-      <p class="placeholder-block"><em>[Teammates: add text, parameters, and media for 3D stacking and multi-layer builds here.]</em></p>
+      <p>
+        We do not run a full volumetric planner over explicit 3D voxel maps. Instead, <strong>vertical structure is handled as a sequence of mostly 2D problems</strong>: each stage still compares segmented blobs in the image to a saved reference, publishes one pick and one place pose per cycle, and relies on depth only where it already mattered for the tabletop case (intrinsics back-projection, RANSAC block-top height, desk-plane band masking in <code>_segment_objects</code> via <code>_compute_desk_block_mask</code>).
+      </p>
+      <p>
+        <strong>Stacking vs. swapping.</strong> In the default (swap) path, if the reference footprint for a place overlaps another live block in the image, perception issues a <strong>temporary displacement</strong> pick and place so the table clears before the intended move (<code>_occupiers_at_place_contour</code>, <code>_find_free_spot</code> in <code>process_pointcloud.py</code>). For <strong>3D stacks</strong>, the operator toggles <strong>stacking mode</strong> with the <code>s</code> key, which calls <code>/toggle_stacking</code>: while stacking is on, that overlap check is skipped so the goal contour is allowed to sit on top of an existing supporter, which is how we reuse the same 2D correspondence machinery for layered builds.
+      </p>
+      <p>
+        <strong>Depth as a layer discriminator.</strong> Parameter <code>place_occupied_depth_thresh_m</code> (default 0.02&nbsp;m) is tuned tighter than a full block height so a block resting one layer higher (closer to the camera along the optical ray) does not get mistaken for the same layer as the reference top when deciding whether something still needs to move. Together with <code>block_height_min_m</code> and <code>block_height_max_m</code>, this keeps segmentation focused on the current physical slab near the desk plane while still letting the arm place onto raised supports when stacking mode allows overlaps.
+      </p>
+      <p>
+        <strong>Operator loop for layers.</strong> Practically, “layer 3” in the lab is <strong>another reference snapshot</strong> taken after lower layers match the previous reference: capture a flat reference, run <code>c</code> until aligned, place a new physical arrangement or add height, capture a new reference for the next tier, repeat. The executor in <code>main.py</code> does not change; each cycle is still one <code>PoseArray</code> pair in <code>base_link</code>. Teammates can extend this subsection with concrete layer counts, failure cases, and tuning notes from your runs.
+      </p>
+      <p class="placeholder-block"><em>[Teammates: add extra figures, timings, and parameter sweeps for stacking here.]</em></p>
 
       <h3>(c) Additional challenges (team notes)</h3>
       <p class="placeholder-block"><em>[Teammates: add integration stories, failed trials, mitigations, or open issues here.]</em></p>

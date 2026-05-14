@@ -144,6 +144,16 @@ section ol {
   font-size: 0.9em;
 }
 
+.placeholder-block {
+  margin: 0.75rem 0 1.25rem;
+  padding: 1.25rem 1.25rem;
+  min-height: 4rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: rgba(22, 26, 34, 0.6);
+  color: var(--muted);
+}
+
 table.data {
   width: 100%;
   border-collapse: collapse;

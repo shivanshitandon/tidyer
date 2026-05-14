@@ -76,11 +76,20 @@
         <code>launch/tidyer_bringup.launch.py</code> brings up RealSense (RGB, aligned depth, point cloud), the <code>process_pointcloud</code> perception executable, <code>tidyer_tf</code> for the wrist-to-camera static transform, <code>tidyer_pick_place</code> for manipulation, and UR MoveIt. Because the keyboard listener needs an interactive TTY, it is started manually (<code>ros2 run tidyer tidyer_keyboard</code>) alongside the launch file—mirroring how other teams separate operator input from long-running nodes.
       </p>
       <figure class="figure">
-        <img src="assets/software-algorithm.png" alt="Software and algorithm overview diagram" width="800" height="450" />
-        <figcaption>System diagram: sensing, perception, planning, and execution modules.</figcaption>
+        <img src="assets/architecture-overview.png" alt="Architecture diagram: RealSense input, OpenCV perception, MoveIt planning, UR7e execution" width="1200" height="675" />
+        <figcaption>High-level pipeline: RGB-D input, perception and segmentation, inverse kinematics and motion planning, and UR7e execution with parallel gripper.</figcaption>
       </figure>
 
-      <h3>(c) Key engineering trade-offs</h3>
+      <h3>(c) Planning and control</h3>
+      <p>
+        Each tidy cycle follows the same staged motion contract: the arm returns to a repeatable observation configuration, perception acquires an aligned depth frame, goals are computed, then the executor runs an approach–grasp–lift–place–retract–home sequence before the operator (or auto-chain) triggers the next capture.
+      </p>
+      <figure class="figure">
+        <img src="assets/planning-control-sequence.png" alt="Execution sequence per cycle: observation, capture, compute pick place, pre-grasp, grasp, lift, place, retract, return" width="1200" height="900" />
+        <figcaption>Execution sequence per cycle: observation pose through grasp, place, and return to the observation pose for the next comparison.</figcaption>
+      </figure>
+
+      <h3>(d) Key engineering trade-offs</h3>
       <ul>
         <li><strong>HSV thresholds</strong> are fast to iterate but sensitive to exposure; we expose per-color JSON ranges (<code>hsv_ranges_json</code>) rather than burying constants in code.</li>
         <li><strong>Desk plane median</strong> from an empty-desk capture (<code>/capture_desk_depth</code>) anchors a depth band mask so segmentation does not bleed across the table.</li>
@@ -92,7 +101,7 @@
         <strong>Move ordering in code.</strong> An early write-up sketched richer priority rules combining displacement, area, and neighborhood structure. The implementation in <code>_find_moved_objects</code> pairs each reference detection to the nearest same-label, same-shape contour in the current image (pixel space), then sorts remaining “moved” pairs by <strong>descending contour area</strong> so the largest mismatch is handled first. Temporary relocations for overlap use a distance-transform free spot biased toward minimal motion from the blocking object’s centroid (<code>_find_free_spot</code>).
       </div>
 
-      <h3>(d) Robustness</h3>
+      <h3>(e) Robustness</h3>
       <p>
         PCA yaw is suppressed for nearly symmetric eigenvalue ratios so the gripper does not hunt unstable headings; IK calls are seed-chained across waypoints in <code>pair_callback</code> to reduce wrist flips. These choices mirror standard practice for tabletop cells: prefer explainable failure modes over opaque end-to-end policies when course timelines are tight.
       </p>
@@ -103,8 +112,8 @@
 
       <h3>(a) Hardware</h3>
       <figure class="figure">
-        <img src="assets/placeholder.svg" alt="Hardware photo placeholder" width="800" height="450" />
-        <figcaption>Add labeled photos of the UR7e, wrist-mounted RealSense, parallel gripper, and workspace when you finalize the report PDF bundle.</figcaption>
+        <img src="assets/hardware-workcell.png" alt="UR collaborative arm with parallel gripper over a wooden workbench with colored blocks in the EECS 106 lab" width="1200" height="900" />
+        <figcaption>Lab workcell: UR arm with parallel gripper, wrist-mounted sensing, and colored blocks on the workspace (EECS 106A/B lab).</figcaption>
       </figure>
       <p>
         <strong>Bill of materials (lab stack):</strong> one UR7e with parallel gripper, one Intel RealSense D435-class RGB-D camera, assorted standardized colored blocks for repeatable tests, and the department robot desk. Justification for RealSense over a pure RGB webcam matches our proposal: aligned depth is required to lift segmented regions into 3D for grasp and placement without a separate structured-light rig.
@@ -124,6 +133,10 @@
         <li>If the reference place footprint intersects another object (2D mask test, dilated by <code>overlap_margin_px</code>) and stacking mode is off, publish a displacement pick–place for the blocking object to a legal desk pixel; otherwise publish the intended tidy move.</li>
         <li>Publish two poses (pick, place) in <code>base_link</code> on <code>/pick_place_pair</code>; write debug imagery and JSON metadata under <code>~/final_proj/pair/</code> for post-run inspection.</li>
       </ol>
+      <figure class="figure">
+        <img src="assets/perception-detections.png" alt="OpenCV detection overlay: color labels, contours, bounding boxes, and centroids on desk blocks" width="1200" height="900" />
+        <figcaption>Live perception output: HSV-driven masks with contour outlines, axis-aligned bounding boxes, centroid markers, and per-block <code>label:shape</code> annotations (OpenCV debug windows during integration).</figcaption>
+      </figure>
 
       <h3>(d) Execution pipeline (<code>main.py</code>, <code>ik.py</code>)</h3>
       <p>
@@ -246,28 +259,24 @@ Optional speed scaling (example):
           <h4>Tvisha Londhe</h4>
           <p class="role"><a href="mailto:tvisha.londhe@berkeley.edu">tvisha.londhe@berkeley.edu</a></p>
           <p>Tvisha is pursuing her undergraduate degree in EECS and is interested in machine learning and learning-based architectures, particularly in how they can be applied to problems in computer vision and robotics.</p>
-          <p><strong>Contributions:</strong> <em>[team: list perception / planning / integration / video / report]</em></p>
         </article>
         <article class="card">
           <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
           <h4>Kenneth Llontop</h4>
           <p class="role"><a href="mailto:kennethllontop@berkeley.edu">kennethllontop@berkeley.edu</a></p>
           <p>Kenneth is pursuing his undergraduate degree in EECS and is interested in leveraging machine learning and robotics to improve social welfare.</p>
-          <p><strong>Contributions:</strong> <em>[team: edit]</em></p>
         </article>
         <article class="card">
           <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
           <h4>Shivanshi Tandon</h4>
           <p class="role"><a href="mailto:shivanshitandon@berkeley.edu">shivanshitandon@berkeley.edu</a></p>
           <p>Shivanshi is pursuing her undergraduate degree in EECS and Business and is interested in intersecting software with her first-time experience in robotics to broaden solution capabilities.</p>
-          <p><strong>Contributions:</strong> <em>[team: edit]</em></p>
         </article>
         <article class="card">
           <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
           <h4>Sarika Pasumarthy</h4>
           <p class="role"><a href="mailto:sarikapasumarthy@berkeley.edu">sarikapasumarthy@berkeley.edu</a></p>
           <p>Sarika is pursuing undergraduate degrees in Computer Science and Business Administration and is interested in AI/ML for social good and in solving interesting problems through combined hardware and software systems.</p>
-          <p><strong>Contributions:</strong> <em>[team: edit]</em></p>
         </article>
       </div>
     </section>

@@ -3,20 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Tidyer — EECS 106A Final Report (Group 17)</title>
+  <title>Tidyer — EECS 106A Final Report</title>
   <link rel="stylesheet" href="assets/style.css" />
   <link rel="icon" type="image/png" href="assets/robot-icon.png" />
-  <!--
-    GitHub Pages: Repository → Settings → Pages → Build and deployment
-    → Source: Deploy from a branch → Branch: main (or default) → Folder: /docs
-    Site URL will be https://<user>.github.io/tidyer/ unless you use a custom domain.
-  -->
 </head>
 <body>
   <header class="site">
     <div class="inner">
       <h1>Tidyer</h1>
-      <p class="tag">Zero-shot framework to clean messy tabletops · EECS 106A · Group 17 · ROS 2 · UR7e · Intel RealSense</p>
+      <p class="tag">Zero-shot framework to clean messy tabletops · EECS 106A · Group 17 · UC Berkeley · Spring 2026</p>
+      <p class="tag" style="margin-top:0.35rem">Tvisha Londhe · Kenneth Llontop · Shivanshi Tandon · Sarika Pasumarthy</p>
       <nav class="toc" aria-label="Sections">
         <a href="#intro">Introduction</a>
         <a href="#design">Design</a>
@@ -30,57 +26,75 @@
   </header>
 
   <main>
-    <p class="deck-line"><strong>In one sentence (deck voice):</strong> Tidyer turns a messy desk into your reference layout—no giant off-the-shelf VLM required—by closing the loop between RGB-D perception, discrete “who moved?” reasoning, and a UR7e that actually executes the tidy.</p>
-
     <section id="intro">
       <h2>1. Introduction</h2>
 
-      <h3>(a) End goal</h3>
-      <p>
-        The project’s north star matches the slide narrative: <strong>transform a cluttered tabletop so it matches a user-provided reference RGB-D snapshot</strong>, then keep iterating until the live scene and the reference agree within tolerances. Operationally, that is implemented as a <strong>service-triggered perception node</strong> that compares segmented objects between frames and publishes pick and place end-effector goals for the arm (<code>/capture_reference</code>, <code>/capture_current</code>, publisher <code>/pick_place_pair</code> in <code>tidyer/perception/process_pointcloud.py</code>).
+      <h3>Abstract</h3>
+      <p class="lede">
+        You have just finished your last homework problem for EECS 106A and your desk is a mess—and after all that work, you still have to reorganize it. <strong>What if you did not have to?</strong> We present <strong>Tidyer</strong>, a zero-shot framework to clean messy tabletops. Grasping remains an active research area; we address tidy-up not with learned policies, but with explicit geometry: object extent, stable depth on the block top, and gripper yaw from structure in the point cloud. The system takes two inputs: a <strong>user-provided reference image</strong> of the desired workspace and a <strong>live RGB-D view</strong> of the current scene, refreshed after each manipulation. We identify objects whose poses differ from the target configuration, compute the required translations and rotations, and execute pick-and-place through inverse kinematics and MoveIt-planned joint trajectories. By iterating until the scene matches the reference within tolerances, the robot gradually reshapes the workspace toward the goal layout.
       </p>
 
-      <h3>(b) Why this is interesting—and what had to work</h3>
+      <h3>(a) Goals</h3>
       <p>
-        The deck argues robotics should be <strong>generalizable, robust, and interactive</strong>. Tidyer tries to earn that without leaning on heavyweight vision-language models: you get “zero-shot” tasking from a single reference photo, then classical geometry and controls do the heavy lifting. The hard parts line up with the code: <strong>stable color segmentation under real lights</strong> (<code>hsv_ranges_json</code> per label), <strong>lifting noisy depth to trustworthy 3D</strong> (pinhole back-projection plus RANSAC plane fitting in <code>_block_top_xyz_camera</code> / <code>_ransac_plane_z_at_pixel</code>), <strong>deciding which block moved</strong> (nearest-neighbor pairing in image space plus thresholds), <strong>resolving swaps when the goal footprint is occupied</strong> (<code>_occupiers_at_place_contour</code> + <code>_find_free_spot</code>), and <strong>closing the loop after human or robot mistakes</strong> (keyboard-driven <code>/capture_current</code> cycles and optional <code>/arm_auto_capture_chain</code> in <code>tidyer/planning/keyboard_trigger.py</code> and <code>tidyer/planning/main.py</code>).
+        A primary goal is to foreground the difficulty of reliable manipulation: <em>what is a practical way to pick up an object and place it where it belongs?</em> Using color and shape cues together with depth-backed 3D estimates, we built a strategy that repeatedly proposes feasible pick and place poses for a parallel-jaw gripper on a UR7e. A second goal is to situate our work relative to modern vision-language systems: early milestones explored whether heavy VLMs were necessary to diff reference versus current scenes; based on course feedback and integration risk, we converged on a <strong>traditional perception + MoveIt</strong> pipeline that we could tune, log, and reproduce in the lab.
       </p>
 
-      <h3>(c) Real-world applications</h3>
+      <h3>(b) Motivation and justification</h3>
       <p>
-        The same pattern—<em>reference state + gap detection + guarded manipulation</em>—shows up anywhere a robot must restore a known layout: kitting, light assembly trays, assistive “clear the desk,” retail restocking, and toy brick or modular structures. The codebase already anticipates <strong>stacking beyond pure 2D swaps</strong> via <code>/toggle_stacking</code>, which flips logic so overlapping contours at the goal no longer force a displacement move (<code>_on_toggle_stacking</code> gates the occupier check in <code>_on_capture_current</code>).
+        Tidying a desk is a relatable instance of <strong>reference-conditioned rearrangement</strong>: the goal configuration is explicit (the reference photo), success is visually checkable, and errors compound quickly when depth or calibration is wrong. We pursued this project to connect geometric perception, discrete sequencing (which block moves first when goals overlap), and industrial-grade motion planning on hardware shared across the class. Related work on language-conditioned block assembly—such as <strong>Blox-Net</strong>, which generates feasible assemblies from prompts and closes the loop with simulation and a physical robot—motivated us to think about constraint-aware layouts, even though our system conditions on an image rather than free text (<a href="https://arxiv.org/abs/2409.17126">Goldberg et&nbsp;al., arXiv:2409.17126</a>).
+      </p>
+
+      <h3>(c) From proposal to final system</h3>
+      <p>
+        Our initial write-up emphasized VLM-mediated differencing between frames, dense correspondence, and search over in-plane rotations at placement. After TA feedback favoring <strong>minimal models and inspectable geometry</strong>, the shipped stack centers on <strong>OpenCV HSV segmentation</strong>, <strong>RealSense intrinsics + depth</strong>, <strong>RANSAC plane fitting</strong> for block-top height, <strong>PCA-based grasp yaw</strong> in <code>base_link</code>, and <strong>MoveIt IK + RRTConnect</strong> for execution (<code>tidyer/perception/process_pointcloud.py</code>, <code>tidyer/planning/ik.py</code>, <code>tidyer/planning/main.py</code>). That pivot traded generality on arbitrary desk clutter for <strong>repeatable demos</strong> on colored blocks with a calibrated wrist camera.
+      </p>
+
+      <h3>(d) Sensing, planning, and actuation (how the pieces fit)</h3>
+      <p>
+        <strong>Sensing:</strong> An Intel RealSense streams aligned RGB-D; the perception node segments stable regions above a captured desk plane, lifts 2D detections to 3D in the camera frame, and transforms points into <code>base_link</code> with <code>tf2_ros</code>. <strong>Planning:</strong> Matching reference to current detections (same color label and classified shape), flagging motion beyond pixel and yaw tolerances, resolving place-footprint overlap by nudging blocking objects to a computed free pixel on the desk when not in stacking mode, then publishing a two-pose <code>PoseArray</code> on <code>/pick_place_pair</code>. <strong>Actuation:</strong> The pick–place node chains IK solutions with seeded continuity, sends time-parameterized trajectories to the UR controller, toggles a binary gripper service, and returns to a known observation configuration before the next capture.
       </p>
     </section>
 
     <section id="design">
       <h2>2. Design</h2>
 
-      <h3>(a) Design criteria and desired functionality</h3>
+      <figure class="figure">
+        <img src="assets/tidyer-concept-workflow.png" alt="Concept diagram: desired state, current state, robot arm, and outcome" width="1100" height="619" />
+        <figcaption>Reference-conditioned tidying at a glance: desired layout, live clutter, UR7e actuator, and the aligned outcome.</figcaption>
+      </figure>
+
+      <h3>(a) Design criteria</h3>
       <ul>
-        <li><strong>Reference-conditioned tidying:</strong> store <code>reference_detections</code> from a captured RGB frame and depth snapshot when the user calls <code>/capture_reference</code>.</li>
-        <li><strong>Discrete-time alignment loop:</strong> each <code>/capture_current</code> either declares success (no moved blocks) or emits exactly one pick–place pair for the arm.</li>
-        <li><strong>Executable goals in <code>base_link</code>:</strong> perception must transform camera-frame geometry using <code>tf2_ros.Buffer</code> and <code>do_transform_point</code> before publishing <code>PoseArray</code> on <code>/pick_place_pair</code>.</li>
-        <li><strong>Safe, repeatable motion:</strong> MoveIt IK (<code>/compute_ik</code>) plus RRTConnect joint-space plans (<code>/plan_kinematic_path</code>) in <code>tidyer/planning/ik.py</code>, executed on the UR through <code>FollowJointTrajectory</code> in <code>tidyer/planning/main.py</code>.</li>
+        <li>Accept a <strong>reference snapshot</strong> of the desk and treat it as the ground-truth layout for colored blocks.</li>
+        <li>On demand, compare the live scene to that reference and emit <strong>at most one executable pick–place</strong> per cycle so integration stays debuggable.</li>
+        <li>Publish goals in <code>base_link</code> so MoveIt and the driver agree on frames.</li>
+        <li>Support <strong>multi-step tidying</strong> and simple <strong>3D structures</strong> via operator-triggered captures and a stacking mode that skips lateral displacement when vertical placement is intentional.</li>
       </ul>
 
-      <h3>(b) System design (from the architecture slide, grounded in nodes)</h3>
+      <h3>(b) Architecture</h3>
       <p>
-        The slide stack—<em>RealSense → OpenCV perception → IK / motion planning → UR7e + gripper</em>—maps cleanly onto running processes: <code>realsense2_camera</code> and <code>ur_moveit</code> are brought up beside package nodes from <code>launch/tidyer_bringup.launch.py</code> (<code>process_pointcloud</code>, <code>tidyer_tf</code>, <code>tidyer_pick_place</code>). The static transform from wrist to camera optical frame is published at 20&nbsp;Hz from <code>tidyer/planning/static_tf_transform.py</code> (<code>wrist_3_link</code> → <code>camera_color_optical_frame</code> with hand-measured translation), which is exactly the link the deck describes as needing for <code>g<sub>cam→base</sub></code>.
+        <code>launch/tidyer_bringup.launch.py</code> brings up RealSense (RGB, aligned depth, point cloud), the <code>process_pointcloud</code> perception executable, <code>tidyer_tf</code> for the wrist-to-camera static transform, <code>tidyer_pick_place</code> for manipulation, and UR MoveIt. Because the keyboard listener needs an interactive TTY, it is started manually (<code>ros2 run tidyer tidyer_keyboard</code>) alongside the launch file—mirroring how other teams separate operator input from long-running nodes.
       </p>
+      <figure class="figure">
+        <img src="assets/software-algorithm.png" alt="Software and algorithm overview diagram" width="800" height="450" />
+        <figcaption>System diagram: sensing, perception, planning, and execution modules.</figcaption>
+      </figure>
 
-      <h3>(c) Design choices and trade-offs</h3>
+      <h3>(c) Key engineering trade-offs</h3>
       <ul>
-        <li><strong>HSV thresholds vs. learned detectors:</strong> fast and interpretable, but the deck already warns about lighting drift—mitigated in code by JSON-configurable per-color ranges (<code>hsv_ranges_json</code>) instead of hard-coded magic numbers only.</li>
-        <li><strong>Median desk plane vs. per-block RANSAC:</strong> <code>/capture_desk_depth</code> stores a single <code>desk_depth_m</code> median for an empty desk, then <code>_compute_desk_block_mask</code> filters segmentation to a physical band around that plane—this is the “table height z-offset / plane filtering” story from the solutions slide, implemented as parameters <code>block_height_min_m</code>, <code>block_height_max_m</code>.</li>
-        <li><strong>Swap-first vs. stack mode:</strong> default path displaces occupiers of the reference footprint; stacking mode skips that check so you can build multi-layer assemblies as teased in the results slides.</li>
+        <li><strong>HSV thresholds</strong> are fast to iterate but sensitive to exposure; we expose per-color JSON ranges (<code>hsv_ranges_json</code>) rather than burying constants in code.</li>
+        <li><strong>Desk plane median</strong> from an empty-desk capture (<code>/capture_desk_depth</code>) anchors a depth band mask so segmentation does not bleed across the table.</li>
+        <li><strong>RANSAC vs. raw median depth</strong> on the block top rejects side-surface outliers before grasp Z is committed.</li>
+        <li><strong>MoveIt at 0.3 velocity scaling</strong> favors safe execution over minimum cycle time—important when perception noise remains on the order of millimeters to centimeters.</li>
       </ul>
 
       <div class="callout">
-        <strong>Slide deck vs. this branch (honest alignment).</strong> The deck advertises a “weighted combo” move priority (displacement, area, nearest neighbor). In the repository, correspondence from current detections to reference slots is <strong>nearest-neighbor in pixel space</strong> per label and shape (<code>_find_moved_objects</code>), and the <strong>next block to act on</strong> is chosen by sorting moved pairs by <strong>descending contour area</strong> (<code>moved.sort(key=lambda d: d[0].area_px, reverse=True)</code>)—a simple proxy for “biggest obvious error first.” Displacement landing uses a nearest free pixel to the occupier’s centroid (<code>_find_free_spot</code>), which is the nearest-neighbor flavor for temporary placements. If you extend the weighted heuristic, document it next to that sort key so the report and code stay matched.
+        <strong>Move ordering in code.</strong> An early write-up sketched richer priority rules combining displacement, area, and neighborhood structure. The implementation in <code>_find_moved_objects</code> pairs each reference detection to the nearest same-label, same-shape contour in the current image (pixel space), then sorts remaining “moved” pairs by <strong>descending contour area</strong> so the largest mismatch is handled first. Temporary relocations for overlap use a distance-transform free spot biased toward minimal motion from the blocking object’s centroid (<code>_find_free_spot</code>).
       </div>
 
-      <h3>(d) Robustness, durability, efficiency</h3>
+      <h3>(d) Robustness</h3>
       <p>
-        RANSAC plane fitting rejects spurious depth spikes on block sides before committing to a grasp height; PCA-based yaw bails out when eigenvalues indicate a nearly symmetric block so the gripper does not chase unstable headings. Those choices improve robustness at the cost of extra compute inside tight perception loops. MoveIt planning uses conservative velocity and acceleration scaling (0.3 in <code>plan_to_joints</code>), trading cycle time for fewer protective stops—directly addressing the deck’s “UR protective stop / aggressive tuning” pain point where perception noise stacks with motion aggressiveness.
+        PCA yaw is suppressed for nearly symmetric eigenvalue ratios so the gripper does not hunt unstable headings; IK calls are seed-chained across waypoints in <code>pair_callback</code> to reduce wrist flips. These choices mirror standard practice for tabletop cells: prefer explainable failure modes over opaque end-to-end policies when course timelines are tight.
       </p>
     </section>
 
@@ -90,104 +104,99 @@
       <h3>(a) Hardware</h3>
       <figure class="figure">
         <img src="assets/placeholder.svg" alt="Hardware photo placeholder" width="800" height="450" />
-        <figcaption>Replace with your lab photos: UR7e, wrist-mounted RealSense, gripper, and workspace layout.</figcaption>
+        <figcaption>Add labeled photos of the UR7e, wrist-mounted RealSense, parallel gripper, and workspace when you finalize the report PDF bundle.</figcaption>
       </figure>
       <p>
-        The deck calls out a <strong>UR7e</strong> arm with a wrist-mounted <strong>Intel RealSense</strong> stream (aligned depth to color, point cloud enabled in launch). The static extrinsic in code is the calibrated hand-eye style offset from <code>wrist_3_link</code> to <code>camera_color_optical_frame</code>; tune these three translation numbers when the mechanical mount changes.
+        <strong>Bill of materials (lab stack):</strong> one UR7e with parallel gripper, one Intel RealSense D435-class RGB-D camera, assorted standardized colored blocks for repeatable tests, and the department robot desk. Justification for RealSense over a pure RGB webcam matches our proposal: aligned depth is required to lift segmented regions into 3D for grasp and placement without a separate structured-light rig.
       </p>
 
-      <h3>(b) Parts and software interfaces</h3>
-      <table class="data">
-        <thead>
-          <tr><th>Subsystem</th><th>What the repo actually runs</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>Camera</td><td>Topics defaulted in parameters: <code>rgb_topic</code>, <code>depth_topic</code>, <code>camera_info_topic</code> (aligned depth to color).</td></tr>
-          <tr><td>TF tree</td><td><code>tidyer_tf</code> + robot URDF / MoveIt frames; perception listens on <code>tf2_ros</code> for <code>camera_color_optical_frame</code> → <code>base_link</code>.</td></tr>
-          <tr><td>Perception</td><td><code>ros2 run tidyer process_pointcloud</code> → class <code>TidyerPerceptionNode</code>.</td></tr>
-          <tr><td>Manipulation</td><td><code>tidyer_pick_place</code> node subscribes to <code>/pick_place_pair</code>, calls <code>IKPlanner.compute_ik</code> and <code>plan_to_joints</code>.</td></tr>
-          <tr><td>Operator UI</td><td><code>tidyer_keyboard</code> in a separate TTY (per launch comment)—keys <code>d</code>/<code>r</code>/<code>c</code>/<code>s</code>/<code>q</code> map to desk capture, reference, current loop, stacking toggle, quit.</td></tr>
-        </tbody>
-      </table>
+      <h3>(b) ROS graph and packages</h3>
+      <p>
+        Declared runtime dependencies in <code>package.xml</code> include <code>rclpy</code>, <code>sensor_msgs</code>, <code>geometry_msgs</code>, <code>cv_bridge</code>, <code>moveit_msgs</code>, <code>tf2_ros</code>, <code>realsense2_camera</code>, <code>ur_moveit_config</code>, and the launch stack. The perception node additionally uses <code>std_srvs/Trigger</code> services and publishes <code>geometry_msgs/PoseArray</code> goals consumed by the executor.
+      </p>
 
-      <h3>(c) Perception pipeline (expanded from slides, tied to functions)</h3>
+      <h3>(c) Perception pipeline (<code>process_pointcloud.py</code>)</h3>
       <ol>
-        <li><strong>Capture reference and current RGB-D.</strong> Services freeze <code>latest_rgb</code> / <code>latest_depth</code> copies and run <code>_segment_objects</code>.</li>
-        <li><strong>HSV + contours.</strong> For each color label, <code>cv2.inRange</code> → morphology → <code>cv2.findContours</code>; centroid uses the center of the axis-aligned bounding box (commented rationale: shadows bias raw moments).</li>
-        <li><strong>Depth geometry.</strong> Intrinsics from <code>CameraInfo</code> populate <code>fx, fy, cx, cy</code>. For each contour, 3D points use the pinhole relations <code>x = (u − c<sub>x</sub>) z / f<sub>x</sub></code>, <code>y = (v − c<sub>y</sub>) z / f<sub>y</sub></code>—the same structure as the slide’s <em>p<sub>cam</sub> = d · K<sup>−1</sup> [u, v, 1]<sup>T</sup></em>, applied per valid pixel sample inside the eroded mask.</li>
-        <li><strong>RANSAC block height.</strong> <code>_ransac_plane_z_at_pixel</code> fits a plane to back-projected inlier points, checks that the normal still has a strong Z component (reject side-lock), then intersects the view ray through <code>(u, v)</code> for the reported top height; fallback is the 20th percentile depth if RANSAC fails.</li>
-        <li><strong>Yaw from PCA.</strong> <code>_grasp_yaw</code> builds a 3D point set on the block top plateau, runs eigen-decomposition, transforms the long axis into <code>base_link</code> via <code>do_transform_vector3</code>, and sets gripper yaw perpendicular to that axis—exactly the “PCA on contour point cloud in base frame” story, with guards for low point count and near-symmetric eigenvalues.</li>
-        <li><strong>“What moved?”</strong> Default thresholds: <code>position_tolerance_px</code> defaults to <strong>50</strong> pixels; <code>yaw_tolerance_rad</code> defaults to ≈<strong>10°</strong> (0.175&nbsp;rad), with yaw deltas ignored for rotationally symmetric shapes where PCA is unreliable.</li>
-        <li><strong>Overlap / temporary moves.</strong> If the reference place mask (dilated by <code>overlap_margin_px</code>) intersects another live contour, the largest occupier is sent to a desk pixel found by distance transform (<code>_find_free_spot</code>) before the original pick–place can succeed—this implements the flowchart branch “place occupied? → move object to temporary location.”</li>
-        <li><strong>Publishing.</strong> Successful geometric checks call <code>_make_pose</code> (top-down quaternion convention: 180° about Y then yaw about Z) and publish two poses in <code>base_link</code>.</li>
+        <li>Subscribe to RGB, aligned depth, and <code>CameraInfo</code>; cache intrinsics <code>fx, fy, cx, cy</code>.</li>
+        <li>On <code>/capture_reference</code>, segment the reference frame and store detections plus the RGB snapshot.</li>
+        <li>On <code>/capture_current</code>, segment the live frame, match to reference by label and shape, and mark a block “moved” if centroid distance exceeds <code>position_tolerance_px</code> (default 50&nbsp;px) or yaw differs beyond <code>yaw_tolerance_rad</code> (≈10°) for non-symmetric shapes.</li>
+        <li>For each contour, apply morphology, find contours, take bbox-centered pixels as robust 2D anchors, back-project valid depth through the pinhole model, optionally fit a dominant plane with RANSAC for top height, and estimate grasp yaw via 3D PCA transformed into <code>base_link</code>.</li>
+        <li>If the reference place footprint intersects another object (2D mask test, dilated by <code>overlap_margin_px</code>) and stacking mode is off, publish a displacement pick–place for the blocking object to a legal desk pixel; otherwise publish the intended tidy move.</li>
+        <li>Publish two poses (pick, place) in <code>base_link</code> on <code>/pick_place_pair</code>; write debug imagery and JSON metadata under <code>~/final_proj/pair/</code> for post-run inspection.</li>
       </ol>
-      <div class="code-ground">Ground truth in repo: <code>tidyer/perception/process_pointcloud.py</code> (services, segmentation, RANSAC, PCA yaw, overlap logic, parameters).</div>
 
-      <h3>(d) Planning and control (slides ↔ MoveIt ↔ executor)</h3>
+      <h3>(d) Execution pipeline (<code>main.py</code>, <code>ik.py</code>)</h3>
       <p>
-        The deck’s product-of-exponentials discussion is the conceptual model for why IK matters; in software the arm consumes discrete Cartesian goals from perception. <code>IKPlanner.compute_ik</code> calls MoveIt’s <code>GetPositionIK</code> with seed chaining to avoid wrist flips between pick and place orientations. <code>plan_to_joints</code> requests <code>RRTConnectkConfigDefault</code> through <code>GetMotionPlan</code>. The executor node builds a fixed motion plus gripper sequence: approach, grasp depth (with <code>gripper_offset_m</code>, <code>finger_insertion_m</code>, <code>approach_height_m</code> parameters), toggle gripper, retract, place approach, place, toggle, return to <code>DEFAULT_JOINTS</code> home—mirroring “plan move → execute pick/place → return home” from the workflow slide.
+        The executor subscribes to <code>/pick_place_pair</code>, lifts waypoints for approach and finger insertion offsets, solves IK through MoveIt’s <code>/compute_ik</code>, plans between joint goals with <code>RRTConnectkConfigDefault</code> via <code>/plan_kinematic_path</code>, sends trajectories to <code>/scaled_joint_trajectory_controller/follow_joint_trajectory</code>, and toggles <code>/toggle_gripper</code> at the appropriate queue points. After a cycle it returns to <code>DEFAULT_JOINTS</code> and can optionally trigger another <code>/capture_current</code> when the auto-capture chain is armed—closing the outer tidy loop without a VLM in the middle.
       </p>
-      <div class="code-ground">Ground truth: <code>tidyer/planning/ik.py</code> (IK + RRTConnect), <code>tidyer/planning/main.py</code> (<code>pair_callback</code>, job queue, trajectory action client, auto-capture chain hooks).</div>
-      <ul>
-        <li><code>tidyer/perception/process_pointcloud.py</code> — segmentation, depth geometry, overlap logic, <code>/pick_place_pair</code> publisher.</li>
-        <li><code>tidyer/planning/main.py</code> — pick–place executor: IK, joint plans, gripper, default-pose verification, auto-capture chain.</li>
-        <li><code>tidyer/planning/ik.py</code> — MoveIt <code>GetPositionIK</code> + <code>GetMotionPlan</code> (RRTConnect).</li>
-        <li><code>tidyer/planning/static_tf_transform.py</code> — wrist → camera optical static TF.</li>
-        <li><code>tidyer/planning/keyboard_trigger.py</code> — desk / reference / current / stacking triggers (separate TTY).</li>
-        <li><code>launch/tidyer_bringup.launch.py</code> — RealSense, perception, TF, pick–place, MoveIt.</li>
-      </ul>
-      <figure class="figure">
-        <img src="assets/software-algorithm.png" alt="Architecture and algorithm diagram from team slides" width="800" height="450" />
-        <figcaption>Architecture / workflow figure carried over from the slide deck (static asset in <code>docs/assets/</code>).</figcaption>
-      </figure>
 
-      <h3>(e) End-to-end operation workflow (matches slide flowchart)</h3>
+      <h3>(e) Operator workflow and terminals</h3>
       <pre class="flow">
-Operator (keyboard_trigger.py)
-  d → /capture_desk_depth     (median depth on empty desk)
-  r → /capture_reference      (state_ref: segmented detections + saved RGB)
-  c → /arm_auto_capture_chain + /capture_current loop until message contains
-      "Scene aligned with reference"  (see _SCENE_ALIGNED_SNIPPET)
-  s → /toggle_stacking        (swap vs stack semantics)
+Terminal A (interactive):
+  ros2 run tidyer tidyer_keyboard
 
-Each /capture_current (process_pointcloud.py)
-  segment current → _find_moved_objects vs reference
-  if none → success + write final.png
-  else → optional displacement if place footprint occupied (unless stacking_mode)
-  else → publish /pick_place_pair → main.py executes queue → optional next capture
+Terminal B:
+  ros2 launch tidyer tidyer_bringup.launch.py
+
+Robot prep (lab scripts, as used in integration):
+  ros2 run ur7e_utils enable_comms
+  ros2 run ur7e_utils tuck
+  ros2 run ur7e_utils reset_state
+  ros2 run ur7e_utils freedrive   # when teaching or recovering
+
+Desk workflow (keyboard):
+  Clear desk → press d  (/capture_desk_depth — median plane)
+           → press r  (/capture_reference — goal layout)
+           → press c  (/arm_auto_capture_chain + /capture_current until aligned)
+           → press s  (/toggle_stacking) when building vertical structures
+
+Optional speed scaling (example):
+  ros2 service call /io_and_status_controller/set_speed_slider ur_msgs/srv/SetSpeedSliderFraction "{speed_slider_fraction: 0.35}"
       </pre>
-      <div class="code-ground">Launch wiring: <code>launch/tidyer_bringup.launch.py</code> includes RealSense, perception node, TF node, pick–place node, and UR MoveIt; keyboard remains external per launch comment.</div>
+      <p>
+        TF from <code>wrist_3_link</code> to <code>camera_color_optical_frame</code> is broadcast from <code>static_tf_transform.py</code>; if this transform or the robot driver tree is misconfigured, <code>/capture_current</code> returns a clear <code>TransformException</code> message (the same failure mode we saw when <code>base_link</code> and the optical frame were not connected).
+      </p>
+
+      <h3>(f) Repository layout (selected)</h3>
+      <ul>
+        <li><code>tidyer/perception/process_pointcloud.py</code> — perception, services, overlap logic, publisher.</li>
+        <li><code>tidyer/planning/main.py</code> — pick–place executor, job queue, auto-capture chain.</li>
+        <li><code>tidyer/planning/ik.py</code> — MoveIt IK and joint-space planning helpers.</li>
+        <li><code>tidyer/planning/static_tf_transform.py</code> — camera extrinsic from wrist.</li>
+        <li><code>tidyer/planning/keyboard_trigger.py</code> — operator-facing triggers.</li>
+        <li><code>launch/tidyer_bringup.launch.py</code> — integrated bring-up.</li>
+      </ul>
     </section>
 
     <section id="results">
       <h2>4. Results</h2>
 
-      <h3>(a) What we demonstrated (mapped to deck examples)</h3>
+      <h3>(a) Behaviors demonstrated</h3>
       <p>
-        The slide deck highlights translation + rotation fixes, explicit swapping, color-sorted desktop tidies, artistic layouts, self-correction after disturbances, and multi-layer 3D assemblies (“Ikea chair,” staircase). Each of those behaviors is <em>reachable</em> with the current architecture: translation/rotation and swaps are the core <code>_find_moved_objects</code> + pick–place loop; color organization is inherent to label-conditioned HSV channels; art and multi-step layouts are repeated operator cycles; 3D structures lean on <code>/toggle_stacking</code> and repeated captures so vertical overlap is intentional rather than treated as a swap conflict.
+        We demonstrated in-plane translation and rotation corrections, multi-block swapping with temporary freespace when goals collide, color-driven organization, deliberate “art” layouts, recovery after disturbances, and multi-layer assemblies when stacking mode is enabled. Each behavior exercises the same core loop—segment, diff against reference, plan one interaction, re-image—rather than a bespoke controller per scenario.
       </p>
       <p>
-        <strong>Replace this paragraph with your measured success rate / timing</strong> once you freeze numbers for Gradescope. Until then, treat the bullets above as the qualitative claim set from the deck, backed by the mechanisms cited in §3.
+        <strong>Quantitative summary:</strong> add trial counts, success rates, and timing here once you finalize numbers for submission.
       </p>
 
       <figure class="figure">
         <img src="assets/placeholder.svg" alt="Results stills placeholder" width="800" height="450" />
-        <figcaption>Populate with stills from Ex1–Ex8 in the deck (translation/rotation, swap, desktop tidy, art, self-correct, layered builds).</figcaption>
+        <figcaption>Replace with high-resolution stills from your best runs (swap, art, 3D stacks).</figcaption>
       </figure>
 
-      <h3>(b) Video — example demonstrations</h3>
-      <p>Short clips aligned with the deck’s Ex.&nbsp;1–6 (embed IDs from your team channel; swap if a link rots).</p>
+      <h3>(b) Video highlights</h3>
+      <p>Short clips from integration testing (update embeds if URLs change).</p>
       <div class="video-scroll-container">
         <div class="video-card">
           <strong>Ex. 1: Rotation and translation</strong>
-          <iframe src="https://www.youtube.com/embed/VIDOaxYbeyc" title="Ex1" allowfullscreen></iframe>
+          <p class="code-ground" style="margin:0;border-radius:0;border-left:none">Add your final YouTube embed URL here (replace this block with an <code>iframe</code>).</p>
         </div>
         <div class="video-card">
           <strong>Ex. 2: 3-way swap</strong>
           <iframe src="https://www.youtube.com/embed/bH_0JVcUyO4" title="3-way swap" allowfullscreen></iframe>
         </div>
         <div class="video-card">
-          <strong>Ex. 3: Smiley face (art!)</strong>
+          <strong>Ex. 3: Smiley face (art)</strong>
           <iframe src="https://www.youtube.com/embed/6RR9ewO2S4c" title="Smiley face art" allowfullscreen></iframe>
         </div>
         <div class="video-card">
@@ -203,61 +212,62 @@ Each /capture_current (process_pointcloud.py)
           <iframe src="https://www.youtube.com/embed/PqTq7uPuEPc" title="Ex6" allowfullscreen></iframe>
         </div>
       </div>
-      <p class="code-ground">Course narrative video: record a single walkthrough that states purpose on camera and shows the full keyboard workflow (<code>d</code> → <code>r</code> → <code>c</code>) from <code>keyboard_trigger.py</code>.</p>
+      <p class="code-ground">For the course narrative requirement, include a single walkthrough video where you state the project purpose on camera and show the full <code>d</code> → <code>r</code> → <code>c</code> operator sequence on hardware.</p>
     </section>
 
     <section id="conclusion">
       <h2>5. Conclusion</h2>
 
-      <h3>(a) Did we meet the design criteria?</h3>
+      <h3>(a) Outcomes vs. criteria</h3>
       <p>
-        On the criteria in §2a, the implementation delivers a complete ROS&nbsp;2 loop from human-provided reference imagery to UR motion, including conflict handling and optional stacking. Performance against “how fast” or “how reliably under harsh light” remains empirical—capture that in §4 once you attach logs from lab trials.
+        The delivered system meets the core criteria in §2a: reference capture, live differencing, overlap-aware sequencing, MoveIt-backed execution, and optional stacking. What remains open is hard robustness—lighting swings, highly reflective blocks, and aggressive speed settings still show up as protective stops or IK aborts, which is consistent with the difficulty called out in our proposal.
       </p>
 
-      <h3>(b) Challenges — deck voice, grounded in what the stack actually does</h3>
-      <p>There were plenty of “this worked in sim” moments once RealSense, MoveIt, and the desk entered the loop. Below is the slide list, with the file or mechanism that either caused the pain or carries the mitigation.</p>
+      <h3>(b) Challenges encountered</h3>
       <ul>
-        <li><strong>TF tree disconnects (<code>base_link</code> ↔ camera):</strong> blocked every <code>_camera_point_to_base</code> call until the wrist→optical static TF and robot drivers agreed. Perception now returns explicit <code>TransformException</code> strings in service responses instead of silent NaNs (<code>process_pointcloud.py</code>).</li>
-        <li><strong>Planner failures / timeouts in clutter or far goals:</strong> matches long <code>planning_time_s</code> requests in <code>plan_to_joints</code>; failures clear the job queue and stop the auto-capture chain in <code>main.py</code> so operators know to re-home or simplify the scene.</li>
-        <li><strong>HSV drift under lighting:</strong> the deck’s fix—explicit per-color bounds—is literally <code>hsv_ranges_json</code> plus morphology in <code>_segment_objects</code>.</li>
-        <li><strong>Centroid / depth noise at grasp and place:</strong> bbox centroids, eroded contour masks, RANSAC plane Z, desk band masking, and wrist lifts (<code>pick_z_offset_m</code>, <code>place_z_offset_m</code>) are all knobs tied to this issue.</li>
-        <li><strong>UR protective stops:</strong> compounded depth/pose error plus aggressive approach distances shows up in the tight coupling between perception-published Z and the hard-coded lift tweaks inside <code>pair_callback</code>—the same story as the deck’s “some branches” warning.</li>
-        <li><strong>Imperfect table geometry + RealSense depth quirks:</strong> show up as inconsistent desk plane medians; the median desk capture (<code>/capture_desk_depth</code>) and band filter exist specifically to tame that non-ideality.</li>
+        <li><strong>TF connectivity:</strong> when <code>base_link</code> and <code>camera_color_optical_frame</code> were not in one tree, perception failed fast with explicit errors—exactly the log line we saw during integration (<code>tf2_ros</code> connectivity between wrist mount and robot description must always be verified before demos).</li>
+        <li><strong>MoveIt / RViz warnings</strong> about camera frames under <code>world</code> highlighted how easy it is for optional monitors to disagree with the frames perception actually uses; we standardized on the optical color frame aligned with depth.</li>
+        <li><strong>HSV sensitivity</strong> required iterative tuning; JSON parameters let us swap color bounds without rebuilding.</li>
+        <li><strong>Depth and centroid noise</strong> motivated RANSAC top fitting, desk band masking, and Z offsets (<code>pick_z_offset_m</code>, <code>place_z_offset_m</code>) to keep the wrist clear of collisions at pick and place.</li>
+        <li><strong>Operator rhythm:</strong> returning to a repeatable observation pose between captures mattered as much as algorithmic correctness for pixel-stable differencing.</li>
       </ul>
 
-      <h3>(c) Flaws, hacks, and next steps</h3>
+      <h3>(c) Future work</h3>
       <p>
-        OpenCV windows inside the perception node (<code>cv2.imshow</code>) are a demo-friendly hack, not a shipping architecture. The desk mask still assumes a mostly flat support surface. Looking ahead—exactly like the “Enhancements” slide—VLMs or language goals, richer object vocab beyond color blocks, reinforcement learning for contact, and tighter accuracy all imply swapping modules at the boundary (<code>_segment_objects</code>, move ordering, or planner interfaces) so tomorrow’s upgrades stay traceable against today’s baselines.
+        Natural extensions include stronger segmentation (e.g., SAM-class models) with careful latency budgeting, richer collision reasoning than single-step overlap masks, learned or search-based grasp orientation for heterogeneous objects, and optional language interfaces layered <em>above</em> the existing reference image contract. Those directions preserve the modular boundary where our team spent most of the debugging budget: the line between “what moved?” and “how should the arm move?”.
       </p>
     </section>
 
     <section id="team">
       <h2>6. Team</h2>
-      <p class="deck-line"><strong>Group 17</strong> — bios below track the slide deck; edit contribution bullets to match who owned perception, planning, hardware, video, and this site.</p>
       <div class="team-grid">
         <article class="card">
           <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
-          <h4>Kenneth Llontrop</h4>
-          <p class="role">EECS</p>
-          <p>Short bio and major contributions: <em>[edit]</em> — hardware, integration, video, report.</p>
-        </article>
-        <article class="card">
-          <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
           <h4>Tvisha Londhe</h4>
-          <p class="role">EECS</p>
-          <p>Short bio and major contributions: <em>[edit]</em> — perception, planning, controls.</p>
+          <p class="role"><a href="mailto:tvisha.londhe@berkeley.edu">tvisha.londhe@berkeley.edu</a></p>
+          <p>Tvisha is pursuing her undergraduate degree in EECS and is interested in machine learning and learning-based architectures, particularly in how they can be applied to problems in computer vision and robotics.</p>
+          <p><strong>Contributions:</strong> <em>[team: list perception / planning / integration / video / report]</em></p>
         </article>
         <article class="card">
           <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
-          <h4>Sarika Pasumarthy</h4>
-          <p class="role">CS + Business</p>
-          <p>Short bio and major contributions: <em>[edit]</em> — software, site, integration.</p>
+          <h4>Kenneth Llontop</h4>
+          <p class="role"><a href="mailto:kennethllontop@berkeley.edu">kennethllontop@berkeley.edu</a></p>
+          <p>Kenneth is pursuing his undergraduate degree in EECS and is interested in leveraging machine learning and robotics to improve social welfare.</p>
+          <p><strong>Contributions:</strong> <em>[team: edit]</em></p>
         </article>
         <article class="card">
           <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
           <h4>Shivanshi Tandon</h4>
-          <p class="role">EECS + Business</p>
-          <p>Short bio and major contributions: <em>[edit]</em> — repository, ROS graph, demo branch.</p>
+          <p class="role"><a href="mailto:shivanshitandon@berkeley.edu">shivanshitandon@berkeley.edu</a></p>
+          <p>Shivanshi is pursuing her undergraduate degree in EECS and Business and is interested in intersecting software with her first-time experience in robotics to broaden solution capabilities.</p>
+          <p><strong>Contributions:</strong> <em>[team: edit]</em></p>
+        </article>
+        <article class="card">
+          <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
+          <h4>Sarika Pasumarthy</h4>
+          <p class="role"><a href="mailto:sarikapasumarthy@berkeley.edu">sarikapasumarthy@berkeley.edu</a></p>
+          <p>Sarika is pursuing undergraduate degrees in Computer Science and Business Administration and is interested in AI/ML for social good and in solving interesting problems through combined hardware and software systems.</p>
+          <p><strong>Contributions:</strong> <em>[team: edit]</em></p>
         </article>
       </div>
     </section>
@@ -265,16 +275,18 @@ Each /capture_current (process_pointcloud.py)
     <section id="extra">
       <h2>7. Additional materials</h2>
       <ul>
-        <li><a href="https://github.com/shivanshitandon/tidyer">Public GitHub repository</a> — all source referenced in this report (<code>package.xml</code>, <code>setup.py</code> entry points, <code>launch/</code>).</li>
-        <li><strong>Slide source:</strong> team deck “[EECS 106A] Tidyer Project” (PDF) — figures and tone incorporated here; keep the deck PDF linked from your course submission folder when you upload artifacts.</li>
-        <li>CAD, datasheets, URDF snippets from external UR / MoveIt packages — link the exact versions you flashed during demos.</li>
-        <li>Raw logs, extra videos, and high-resolution result photos — add once hosted.</li>
+        <li><a href="https://github.com/shivanshitandon/tidyer">GitHub repository</a> — source, <code>package.xml</code>, <code>setup.py</code> entry points, and launch files.</li>
+        <li><strong>Branch note:</strong> integrated demos and this site track the <code>demo</code> branch; align <code>main</code> if your course submission requires a single default branch.</li>
+        <li>CAD for custom mounts, vendor URDF versions, and component datasheets — add links as you publish them.</li>
       </ul>
-      <div class="callout">
-        <strong>Repo / branch note.</strong> Course integration used the <code>demo</code> line for the latest end-to-end behavior; <code>main</code> may diverge. Point graders to the branch you want evaluated, and keep <code>docs/</code> merged there before the Pages deadline.
-      </div>
-      <p style="font-size:0.85rem;color:var(--muted);margin-top:2rem;">
-        Slide template attribution (per original deck): presentation template by Slidesgo; icons by Flaticon; assets by Freepik / Stories.
+
+      <h3>References</h3>
+      <p style="font-size:0.92rem;color:var(--muted);">
+        A. Goldberg, K. Kondap, T. Qiu, Z. Ma, L. Fu, J. Kerr, H. Huang, K. Chen, K. Fang, and K. Goldberg,
+        “Blox-Net: Generative Design-for-Robot-Assembly Using VLM Supervision, Physics Simulation, and a Robot with Reset,”
+        arXiv:2409.17126, 2024.
+        <a href="https://arxiv.org/abs/2409.17126">https://arxiv.org/abs/2409.17126</a>
+        (PDF: <a href="https://arxiv.org/pdf/2409.17126">https://arxiv.org/pdf/2409.17126</a>).
       </p>
     </section>
   </main>

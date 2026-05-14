@@ -116,7 +116,7 @@ section ol {
   padding-left: 1.25rem;
 }
 
-.deck-line {
+.lede {
   margin: 1.25rem 0;
   padding: 0.9rem 1.1rem;
   border-left: 4px solid var(--deck);
@@ -125,7 +125,7 @@ section ol {
   font-size: 1.02rem;
 }
 
-.deck-line strong {
+.lede strong {
   color: #e0e7ff;
 }
 

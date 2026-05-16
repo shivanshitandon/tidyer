@@ -64,7 +64,7 @@
 
 <!-- Hero -->
 <section class="hero">
-  <div class="hero-body">
+  <div class="hero-body" style="padding-bottom: 0.5rem;">
     <div class="container is-max-desktop">
       <div class="columns is-centered">
         <div class="column has-text-centered">
@@ -81,7 +81,6 @@
           <div class="is-size-5 publication-authors" style="margin-top: 0.5rem;">
             <span class="author-block">UC Berkeley &middot; EECS 106A &middot; Group 17 &middot; Spring 2026</span>
           </div>
-          <div class="column has-text-centered">
             <div class="publication-links">
               <span class="link-block">
                 <a href="https://github.com/shivanshitandon/tidyer" target="_blank"
@@ -101,11 +100,11 @@
 <!-- Teaser image -->
 <section class="hero teaser">
   <div class="container is-max-desktop">
-    <div class="hero-body">
+    <div class="hero-body" style="padding-top: 0;">
       <img src="assets/tidyer-concept-workflow.png"
            alt="Reference-conditioned tidying: desired layout, live clutter, UR7e actuator, and the aligned outcome"
-           style="border-radius: 12px; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); width: 100%;" />
-      <h2 class="subtitle has-text-centered" style="margin-top: 1.5rem;">
+           style="display: block; border-radius: 12px; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); width: 100%;" />
+      <h2 class="subtitle has-text-centered" style="margin-top: 0.5rem;">
         The robot takes a <strong>reference photo</strong> of the desired layout and a live <strong>RGB-D view</strong> of the current scene, then iteratively picks and places objects until the workspace matches.
       </h2>
     </div>
@@ -130,51 +129,45 @@
 
 
 <!-- Video highlights -->
-<section class="section hero is-light">
-  <div class="container is-max-widescreen">
+<section id="video-highlights" class="section hero is-light">
+  <div style="max-width: 1400px; margin: 0 auto; padding: 0 2rem;">
     <h2 class="title is-3 has-text-centered">Video Highlights</h2>
     <div class="columns is-multiline">
       <div class="column is-one-third">
-        <div class="publication-video">
-          <iframe src="https://www.youtube.com/embed/VIDOaxYbeyc" title="Ex. 1: Rotation and translation" allowfullscreen></iframe>
+        <div class="publication-video is-vertical">
+          <iframe src="https://www.youtube.com/embed/VIDOaxYbeyc?autoplay=1&mute=1&loop=1&playlist=VIDOaxYbeyc" title="Ex. 1: Rotation and translation" allowfullscreen></iframe>
         </div>
         <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 1: Rotation and translation</p>
       </div>
       <div class="column is-one-third">
-        <div class="publication-video">
-          <iframe src="https://www.youtube.com/embed/bH_0JVcUyO4" title="Ex. 2: 3-way swap" allowfullscreen></iframe>
+        <div class="publication-video is-vertical">
+          <iframe src="https://www.youtube.com/embed/bH_0JVcUyO4?autoplay=1&mute=1&loop=1&playlist=bH_0JVcUyO4" title="Ex. 2: 3-way swap" allowfullscreen></iframe>
         </div>
-        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 2: 3-way swap</p>
+        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 2: 2-way swap</p>
       </div>
       <div class="column is-one-third">
-        <div class="publication-video">
-          <iframe src="https://www.youtube.com/embed/zai4vFa6mLs" title="Ex. 3: Tidy messy desk" allowfullscreen></iframe>
+        <div class="publication-video is-vertical">
+          <iframe src="https://www.youtube.com/embed/6RR9ewO2S4c?autoplay=1&mute=1&loop=1&playlist=6RR9ewO2S4c" title="Ex. 3: Smiley face (art)" allowfullscreen></iframe>
         </div>
-        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 3: Tidy messy desk (color organization)</p>
+        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 3: Smiley face (art)</p>
       </div>
       <div class="column is-one-third">
-        <div class="publication-video">
-          <iframe src="https://www.youtube.com/embed/6RR9ewO2S4c" title="Ex. 4: Smiley face (art)" allowfullscreen></iframe>
+        <div class="publication-video is-vertical">
+          <iframe src="https://www.youtube.com/embed/5GZHWxp8JhA?autoplay=1&mute=1&loop=1&playlist=5GZHWxp8JhA" title="Ex. 4: Tidy messy desk + Self-correction" allowfullscreen></iframe>
         </div>
-        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 4: Smiley face (art)</p>
+        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 4: Tidy Desk + Self-correction</p>
       </div>
       <div class="column is-one-third">
-        <div class="publication-video">
-          <iframe src="https://www.youtube.com/embed/5GZHWxp8JhA" title="Ex. 5: Self-correction" allowfullscreen></iframe>
+        <div class="publication-video is-vertical">
+          <iframe src="https://www.youtube.com/embed/Dvf_cgNil_o?autoplay=1&mute=1&loop=1&playlist=Dvf_cgNil_o" title="Ex. 5: 3D structures + 3D Self-Correction(chair)" allowfullscreen></iframe>
         </div>
-        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 5: Self-correction</p>
+        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 5: 3D structures + Self-Correction (chairs)</p>
       </div>
       <div class="column is-one-third">
-        <div class="publication-video">
-          <iframe src="https://www.youtube.com/embed/Dvf_cgNil_o" title="Ex. 6: 3D structures (chairs)" allowfullscreen></iframe>
+        <div class="publication-video is-vertical">
+          <iframe src="https://www.youtube.com/embed/PqTq7uPuEPc?autoplay=1&mute=1&loop=1&playlist=PqTq7uPuEPc" title="Ex. 6: 3D structures (staircase)" allowfullscreen></iframe>
         </div>
-        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 6: 3D structures (chairs)</p>
-      </div>
-      <div class="column is-one-third is-offset-one-third">
-        <div class="publication-video">
-          <iframe src="https://www.youtube.com/embed/PqTq7uPuEPc" title="Ex. 7: 3D structures (staircase)" allowfullscreen></iframe>
-        </div>
-        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 7: 3D structures (staircase)</p>
+        <p class="has-text-centered" style="margin-top: 0.5rem;">Ex. 6: 3D structures (staircase)</p>
       </div>
     </div>
   </div>
@@ -442,8 +435,8 @@
     <div class="content">
 
       <h4>3.1 Hardware</h4>
-      <figure style="margin: 1rem 0;">
-        <img src="assets/hardware-workcell.png"
+      <figure style="max-width: 65%; margin: 1rem auto;">
+        <img src="assets/hardware_pic.jpeg"
              alt="UR collaborative arm with parallel gripper over a wooden workbench with colored blocks in the EECS 106 lab" loading="lazy"
              style="border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); width: 100%;" />
         <figcaption style="text-align: center; color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
@@ -563,8 +556,8 @@
 
       <li>Save debug images and JSON metadata under <code>~/final_proj/pair/</code> for post-run inspection.</li>
     </ul>
-      <figure style="margin: 1rem 0;">
-        <img src="assets/perception-detections.png"
+      <figure style="margin: 1rem -18rem;">
+        <img src="assets/implement_pic_pipeline.png" 
              alt="OpenCV detection overlay: color labels, contours, bounding boxes, and centroids on desk blocks" loading="lazy"
              style="border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); width: 100%;" />
         <figcaption style="text-align: center; color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
@@ -666,22 +659,24 @@ Desk workflow (keyboard):
       </p>
 
       <figure style="margin: 1rem 0;">
-        <img src="assets/results-random-vs-tidy.png"
+        <img src="assets/image_implementation15.png"
              alt="Random block configuration compared to Tidyer one-shot result on the tabletop" loading="lazy"
              style="border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); width: 100%;" />
         <figcaption style="text-align: center; color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
-          Random initial configuration (left) and the layout after a one-shot tidy run (right), showing multi-object rearrangement on the wooden workspace.
+          Swap conflict resolution: when a target placement is occupied, the system temporarily displaces the blocking object to a computed free-space location before executing the intended move.
         </figcaption>
       </figure>
 
       <figure style="margin: 1rem 0;">
-        <img src="assets/results-stacking-target-layers.png"
+        <img src="assets/image_implementation17.png"
              alt="Target stacking configuration shown as layer 1 flat layout, layer 2 partial stacks, layer 3 taller stacks" loading="lazy"
              style="border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); width: 100%;" />
         <figcaption style="text-align: center; color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
-          Reference-driven stacking: target configurations for layer 1 (flat), layer 2 (partial stacks), and layer 3 (taller assemblies).
+          Reference and current image for a set configuration.
         </figcaption>
       </figure>
+
+      <p style="font-size: 1.3rem; font-weight: 700;"><a href="#video-highlights">See video highlights &rarr;</a></p>
 
       <h4>4.2 3D implementation</h4>
       <p>

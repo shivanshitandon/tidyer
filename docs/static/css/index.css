@@ -242,6 +242,18 @@ body {
     border-radius: var(--border-radius-lg);
 }
 
+/* Vertical (9:16) videos: crop the 16:9 iframe to show only the center video strip */
+.publication-video.is-vertical {
+    padding-bottom: 177.78%; /* 16/9 × 100% for a 9:16 container */
+}
+
+.publication-video.is-vertical iframe {
+    width: 315.84%;  /* 256/81 × 100%: scales iframe so its 9:16 center strip fills container width */
+    height: 100%;
+    left: -107.92%; /* -(315.84% - 100%) / 2: centers the strip */
+    top: 0;
+}
+
 .publication-body img {
   border-radius: var(--border-radius);
   box-shadow: var(--shadow-md);

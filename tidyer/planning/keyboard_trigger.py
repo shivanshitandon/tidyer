@@ -19,7 +19,7 @@ HELP = (
 )
 
 
-# Must match tidyer.perception.process_pointcloud aligned-scene message text.
+# Must match tidyer.perception.rgbd_perception aligned-scene message text.
 _SCENE_ALIGNED_SNIPPET = 'Scene aligned with reference'
 
 

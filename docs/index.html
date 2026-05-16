@@ -1,66 +1,365 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Tidyer: EECS 106A Final Report</title>
-  <link rel="stylesheet" href="assets/style.css" />
-  <link rel="icon" type="image/png" href="assets/robot-icon.png" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <meta name="title" content="Tidyer - Tvisha Londhe, Kenneth Llontop, Shivanshi Tandon, Sarika Pasumarthy">
+  <meta name="description" content="Tidyer: A zero-shot framework for cleaning messy tabletops using reference-conditioned pick-and-place with a UR7e robot arm and Intel RealSense RGB-D camera.">
+  <meta name="keywords" content="robotics, tabletop rearrangement, manipulation, pick and place, computer vision, ROS2, MoveIt, EECS 106A, UC Berkeley">
+  <meta name="author" content="Tvisha Londhe, Kenneth Llontop, Shivanshi Tandon, Sarika Pasumarthy">
+
+  <title>Tidyer: Zero-shot Tabletop Rearrangement | EECS 106A</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://ajax.googleapis.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+
+  <link rel="icon" type="image/x-icon" href="static/images/favicon.ico">
+
+  <link rel="stylesheet" href="static/css/bulma.min.css">
+  <link rel="stylesheet" href="static/css/index.css">
+
+  <link rel="preload" href="static/css/bulma-carousel.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="static/css/bulma-slider.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="static/css/fontawesome.all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="preload" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+
+  <noscript>
+    <link rel="stylesheet" href="static/css/bulma-carousel.min.css">
+    <link rel="stylesheet" href="static/css/bulma-slider.min.css">
+    <link rel="stylesheet" href="static/css/fontawesome.all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  </noscript>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <script defer src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="static/js/fontawesome.all.min.js"></script>
+  <script defer src="static/js/bulma-carousel.min.js"></script>
+  <script defer src="static/js/bulma-slider.min.js"></script>
+  <script defer src="static/js/index.js"></script>
+
+  <style>
+    .section-report h3 { font-size: 1.15rem; font-weight: 700; margin: 1.5rem 0 0.5rem; }
+    .section-report p, .section-report li { line-height: 1.8; }
+    .section-report ul, .section-report ol { margin: 0.75rem 0 0.75rem 1.5rem; }
+    .section-report li { margin-bottom: 0.4rem; }
+    .section-report pre { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #2563eb;
+      padding: 1rem; font-size: 0.85rem; line-height: 1.5; overflow-x: auto; margin: 1.25rem 0;
+      border-radius: 0 8px 8px 0; }
+    .section-report figure { margin: 2rem 0; text-align: center; }
+    .section-report figure img { max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.08); margin: 0 auto 0.75rem; }
+    .section-report figcaption { font-size: 0.88rem; color: #64748b; font-style: italic; }
+    .team-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.5rem; text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+    .team-card img { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; margin: 0 auto 1rem; display: block; }
+    .team-card h4 { font-weight: 700; font-size: 1rem; margin-bottom: 0.25rem; }
+    .team-card .role { font-size: 0.85rem; color: #64748b; margin-bottom: 0.5rem; }
+    .team-card p { font-size: 0.88rem; color: #475569; line-height: 1.6; }
+    .video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin: 1.5rem 0; }
+    .video-grid .video-label { font-weight: 600; font-size: 0.9rem; text-align: center; margin-bottom: 0.5rem; }
+  </style>
 </head>
 <body>
-  <header class="site">
-    <div class="inner">
-      <h1>Tidyer</h1>
-      <p class="tag">Zero-shot framework to clean messy tabletops · EECS 106A · Group 17 · UC Berkeley · Spring 2026</p>
-      <p class="tag" style="margin-top:0.35rem">Tvisha Londhe · Kenneth Llontop · Shivanshi Tandon · Sarika Pasumarthy</p>
-      <nav class="toc" aria-label="Sections">
-        <a href="#intro">Introduction</a>
-        <a href="#design">Design</a>
-        <a href="#implementation">Implementation</a>
-        <a href="#results">Results</a>
-        <a href="#conclusion">Conclusion</a>
-        <a href="#team">Team</a>
-        <a href="#extra">Additional materials</a>
-      </nav>
+
+  <!-- Scroll to Top Button -->
+  <button class="scroll-to-top" onclick="scrollToTop()" title="Scroll to top" aria-label="Scroll to top">
+    <i class="fas fa-chevron-up"></i>
+  </button>
+
+  <main id="main-content">
+
+  <!-- ===== HERO ===== -->
+  <section class="hero">
+    <div class="hero-body">
+      <div class="container is-max-desktop">
+        <div class="columns is-centered">
+          <div class="column has-text-centered">
+            <h1 class="title is-1 publication-title">Tidyer: Zero-shot Tabletop Rearrangement</h1>
+            <div class="is-size-5 publication-authors">
+              <span class="author-block">
+                <a href="mailto:tvisha.londhe@berkeley.edu" target="_blank">Tvisha Londhe</a><sup>*</sup>,</span>
+              <span class="author-block">
+                <a href="mailto:kennethllontop@berkeley.edu" target="_blank">Kenneth Llontop</a><sup>*</sup>,</span>
+              <span class="author-block">
+                <a href="mailto:shivanshitandon@berkeley.edu" target="_blank">Shivanshi Tandon</a><sup>*</sup>,</span>
+              <span class="author-block">
+                <a href="mailto:sarikapasumarthy@berkeley.edu" target="_blank">Sarika Pasumarthy</a><sup>*</sup>
+              </span>
+            </div>
+
+            <div class="is-size-5 publication-authors">
+              <span class="author-block">UC Berkeley &middot; EECS 106A &middot; Group 17 &middot; Spring 2026</span>
+              <span class="eql-cntrb"><small><br><sup>*</sup>Equal Contribution</small></span>
+            </div>
+
+            <div class="column has-text-centered">
+              <div class="publication-links">
+                <span class="link-block">
+                  <a href="https://github.com/shivanshitandon/tidyer" target="_blank"
+                     class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon"><i class="fab fa-github"></i></span>
+                    <span>Code</span>
+                  </a>
+                </span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
     </div>
-  </header>
+  </section>
 
-  <main>
-    <section id="intro">
-      <h2>1. Introduction</h2>
 
-      <h3>Abstract</h3>
-      <p class="lede">
-        You have just finished your last homework problem for EECS 106A and your desk is a mess, and after all that work, you still have to reorganize it. <strong>What if you did not have to?</strong> We present <strong>Tidyer</strong>, a zero-shot framework to clean messy tabletops. Grasping remains an active research area; we address tidy-up not with learned policies, but with explicit geometry: object extent, stable depth on the block top, and gripper yaw from structure in the point cloud. The system takes two inputs: a <strong>user-provided reference image</strong> of the desired workspace and a <strong>live RGB-D view</strong> of the current scene, refreshed after each manipulation. We identify objects whose poses differ from the target configuration, compute the required translations and rotations, and execute pick-and-place through inverse kinematics and MoveIt-planned joint trajectories. By iterating until the scene matches the reference within tolerances, the robot gradually reshapes the workspace toward the goal layout.
-      </p>
+  <!-- ===== TEASER ===== -->
+  <section class="hero teaser">
+    <div class="container is-max-desktop">
+      <div class="hero-body">
+        <img src="assets/tidyer-concept-workflow.png"
+             alt="Tidyer concept: desired state, current state, robot arm, and outcome"
+             style="width:100%;border-radius:8px;" />
+        <h2 class="subtitle has-text-centered">
+          Tidyer takes a reference photo of the desired desk layout and a live RGB-D view, then
+          iteratively picks and places objects until the workspace matches the goal.
+        </h2>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ===== ABSTRACT ===== -->
+  <section class="section hero is-light" id="abstract">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered has-text-centered">
+        <div class="column is-four-fifths">
+          <h2 class="title is-3">Abstract</h2>
+          <div class="content has-text-justified">
+            <p>
+              You have just finished your last homework problem for EECS 106A and your desk is a mess,
+              and after all that work, you still have to reorganize it. <strong>What if you did not have
+              to?</strong> We present <strong>Tidyer</strong>, a zero-shot framework to clean messy
+              tabletops. Grasping remains an active research area; we address tidy-up not with learned
+              policies, but with explicit geometry: object extent, stable depth on the block top, and
+              gripper yaw from structure in the point cloud. The system takes two inputs: a
+              <strong>user-provided reference image</strong> of the desired workspace and a
+              <strong>live RGB-D view</strong> of the current scene, refreshed after each manipulation.
+              We identify objects whose poses differ from the target configuration, compute the required
+              translations and rotations, and execute pick-and-place through inverse kinematics and
+              MoveIt-planned joint trajectories. By iterating until the scene matches the reference
+              within tolerances, the robot gradually reshapes the workspace toward the goal layout.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ===== IMAGE CAROUSEL ===== -->
+  <section class="hero is-small">
+    <div class="hero-body">
+      <div class="container">
+        <div id="results-carousel" class="carousel results-carousel">
+
+          <div class="item">
+            <img src="assets/tidyer-concept-workflow.png"
+                 alt="Tidyer concept workflow: reference image, live scene, robot execution" loading="lazy" />
+            <h2 class="subtitle has-text-centered">
+              Reference-conditioned tidying: desired layout, live clutter, UR7e actuator, and the aligned outcome.
+            </h2>
+          </div>
+
+          <div class="item">
+            <img src="assets/architecture-overview.png"
+                 alt="System architecture: RGB-D input, perception, IK planning, UR7e execution" loading="lazy" />
+            <h2 class="subtitle has-text-centered">
+              End-to-end pipeline: RGB-D acquisition, HSV segmentation, MoveIt planning, and UR7e execution.
+            </h2>
+          </div>
+
+          <div class="item">
+            <img src="assets/perception-detections.png"
+                 alt="OpenCV detection overlay: color labels, contours, bounding boxes on desk blocks" loading="lazy" />
+            <h2 class="subtitle has-text-centered">
+              Live perception output: HSV-driven masks with contour outlines, bounding boxes, centroid markers, and per-block label annotations.
+            </h2>
+          </div>
+
+          <div class="item">
+            <img src="assets/results-random-vs-tidy.png"
+                 alt="Random block configuration vs Tidyer one-shot result" loading="lazy" />
+            <h2 class="subtitle has-text-centered">
+              Random initial configuration (left) and the layout after a one-shot tidy run (right).
+            </h2>
+          </div>
+
+          <div class="item">
+            <img src="assets/results-stacking-target-layers.png"
+                 alt="Target stacking configuration: layer 1 flat, layer 2 partial stacks, layer 3 taller stacks" loading="lazy" />
+            <h2 class="subtitle has-text-centered">
+              Reference-driven stacking: target configurations for layer 1 (flat), layer 2 (partial stacks), and layer 3 (taller assemblies).
+            </h2>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ===== FEATURED DEMO VIDEO ===== -->
+  <section class="hero is-small is-light">
+    <div class="hero-body">
+      <div class="container">
+        <h2 class="title is-3 has-text-centered">Demo: Tidy Messy Desk</h2>
+        <div class="columns is-centered has-text-centered">
+          <div class="column is-four-fifths">
+            <div class="publication-video">
+              <iframe src="https://www.youtube.com/embed/zai4vFa6mLs"
+                      frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ===== MORE DEMOS ===== -->
+  <section class="hero is-small" id="results-videos">
+    <div class="hero-body">
+      <div class="container">
+        <h2 class="title is-3">More Demonstrations</h2>
+        <div class="columns is-multiline">
+
+          <div class="column is-half">
+            <p class="has-text-centered" style="font-weight:600;margin-bottom:0.75rem">Ex. 1: Rotation and Translation</p>
+            <div class="publication-video">
+              <iframe src="https://www.youtube.com/embed/VIDOaxYbeyc"
+                      frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+            </div>
+          </div>
+
+          <div class="column is-half">
+            <p class="has-text-centered" style="font-weight:600;margin-bottom:0.75rem">Ex. 2: 3-way Swap</p>
+            <div class="publication-video">
+              <iframe src="https://www.youtube.com/embed/bH_0JVcUyO4"
+                      frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+            </div>
+          </div>
+
+          <div class="column is-half">
+            <p class="has-text-centered" style="font-weight:600;margin-bottom:0.75rem">Ex. 4: Smiley Face (Art)</p>
+            <div class="publication-video">
+              <iframe src="https://www.youtube.com/embed/6RR9ewO2S4c"
+                      frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+            </div>
+          </div>
+
+          <div class="column is-half">
+            <p class="has-text-centered" style="font-weight:600;margin-bottom:0.75rem">Ex. 5: Self-correction</p>
+            <div class="publication-video">
+              <iframe src="https://www.youtube.com/embed/5GZHWxp8JhA"
+                      frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+            </div>
+          </div>
+
+          <div class="column is-half">
+            <p class="has-text-centered" style="font-weight:600;margin-bottom:0.75rem">Ex. 6: 3D Structures (Chairs)</p>
+            <div class="publication-video">
+              <iframe src="https://www.youtube.com/embed/Dvf_cgNil_o"
+                      frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+            </div>
+          </div>
+
+          <div class="column is-half">
+            <p class="has-text-centered" style="font-weight:600;margin-bottom:0.75rem">Ex. 7: 3D Structures (Staircase)</p>
+            <div class="publication-video">
+              <iframe src="https://www.youtube.com/embed/PqTq7uPuEPc"
+                      frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ===== 1. INTRODUCTION ===== -->
+  <section class="section" id="intro">
+    <div class="container is-max-desktop section-report">
+      <h2 class="title is-3">1. Introduction</h2>
 
       <h3>(a) Goals</h3>
       <p>
-        A primary goal is to foreground the difficulty of reliable manipulation: <em>what is a practical way to pick up an object and place it where it belongs?</em> Using color and shape cues together with depth-backed 3D estimates, we built a strategy that repeatedly proposes feasible pick and place poses for a parallel-jaw gripper on a UR7e. A second goal is to situate our work relative to modern vision-language systems: early milestones explored whether heavy VLMs were necessary to diff reference versus current scenes; based on course feedback and integration risk, we converged on a <strong>traditional perception + MoveIt</strong> pipeline that we could tune, log, and reproduce in the lab.
+        A primary goal is to foreground the difficulty of reliable manipulation: <em>what is a practical
+        way to pick up an object and place it where it belongs?</em> Using color and shape cues together
+        with depth-backed 3D estimates, we built a strategy that repeatedly proposes feasible pick and
+        place poses for a parallel-jaw gripper on a UR7e. A second goal is to situate our work relative
+        to modern vision-language systems: early milestones explored whether heavy VLMs were necessary to
+        diff reference versus current scenes; based on course feedback and integration risk, we converged
+        on a <strong>traditional perception + MoveIt</strong> pipeline that we could tune, log, and
+        reproduce in the lab.
       </p>
 
       <h3>(b) Motivation and justification</h3>
       <p>
-        Tidying a desk is a relatable instance of <strong>reference-conditioned rearrangement</strong>: the goal configuration is explicit (the reference photo), success is visually checkable, and errors compound quickly when depth or calibration is wrong. We pursued this project to connect geometric perception, discrete sequencing (which block moves first when goals overlap), and industrial-grade motion planning on hardware shared across the class. Related work on language-conditioned block assembly, such as <strong>Blox-Net</strong>, which generates feasible assemblies from prompts and closes the loop with simulation and a physical robot, motivated us to think about constraint-aware layouts, even though our system conditions on an image rather than free text (<a href="https://arxiv.org/abs/2409.17126">Goldberg et&nbsp;al., arXiv:2409.17126</a>).
+        Tidying a desk is a relatable instance of <strong>reference-conditioned rearrangement</strong>:
+        the goal configuration is explicit (the reference photo), success is visually checkable, and
+        errors compound quickly when depth or calibration is wrong. We pursued this project to connect
+        geometric perception, discrete sequencing (which block moves first when goals overlap), and
+        industrial-grade motion planning on hardware shared across the class. Related work on
+        language-conditioned block assembly, such as <strong>Blox-Net</strong>, which generates feasible
+        assemblies from prompts and closes the loop with simulation and a physical robot, motivated us to
+        think about constraint-aware layouts, even though our system conditions on an image rather than
+        free text (<a href="https://arxiv.org/abs/2409.17126" target="_blank">Goldberg et&nbsp;al.,
+        arXiv:2409.17126</a>).
       </p>
 
       <h3>(c) From proposal to final system</h3>
       <p>
-        Our initial write-up emphasized VLM-mediated differencing between frames, dense correspondence, and search over in-plane rotations at placement. After TA feedback favoring <strong>minimal models and inspectable geometry</strong>, the shipped stack centers on <strong>OpenCV HSV segmentation</strong>, <strong>RealSense intrinsics + depth</strong>, <strong>RANSAC plane fitting</strong> for block-top height, <strong>PCA-based grasp yaw</strong> in <code>base_link</code>, and <strong>MoveIt IK + RRTConnect</strong> for execution (<code>tidyer/perception/process_pointcloud.py</code>, <code>tidyer/planning/ik.py</code>, <code>tidyer/planning/main.py</code>). That pivot traded generality on arbitrary desk clutter for <strong>repeatable demos</strong> on colored blocks with a calibrated wrist camera.
+        Our initial write-up emphasized VLM-mediated differencing between frames, dense correspondence,
+        and search over in-plane rotations at placement. After TA feedback favoring
+        <strong>minimal models and inspectable geometry</strong>, the shipped stack centers on
+        <strong>OpenCV HSV segmentation</strong>, <strong>RealSense intrinsics + depth</strong>,
+        <strong>RANSAC plane fitting</strong> for block-top height, <strong>PCA-based grasp yaw</strong>
+        in <code>base_link</code>, and <strong>MoveIt IK + RRTConnect</strong> for execution
+        (<code>tidyer/perception/process_pointcloud.py</code>, <code>tidyer/planning/ik.py</code>,
+        <code>tidyer/planning/main.py</code>). That pivot traded generality on arbitrary desk clutter for
+        <strong>repeatable demos</strong> on colored blocks with a calibrated wrist camera.
       </p>
 
-      <h3>(d) Sensing, planning, and actuation (how the pieces fit)</h3>
+      <h3>(d) Sensing, planning, and actuation</h3>
       <p>
-        <strong>Sensing:</strong> An Intel RealSense streams aligned RGB-D; the perception node segments stable regions above a captured desk plane, lifts 2D detections to 3D in the camera frame, and transforms points into <code>base_link</code> with <code>tf2_ros</code>. <strong>Planning:</strong> Matching reference to current detections (same color label and classified shape), flagging motion beyond pixel and yaw tolerances, resolving place-footprint overlap by nudging blocking objects to a computed free pixel on the desk when not in stacking mode, then publishing a two-pose <code>PoseArray</code> on <code>/pick_place_pair</code>. <strong>Actuation:</strong> The pick and place node chains IK solutions with seeded continuity, sends time-parameterized trajectories to the UR controller, toggles a binary gripper service, and returns to a known observation configuration before the next capture.
+        <strong>Sensing:</strong> An Intel RealSense streams aligned RGB-D; the perception node segments
+        stable regions above a captured desk plane, lifts 2D detections to 3D in the camera frame, and
+        transforms points into <code>base_link</code> with <code>tf2_ros</code>.
+        <strong>Planning:</strong> Matching reference to current detections (same color label and
+        classified shape), flagging motion beyond pixel and yaw tolerances, resolving place-footprint
+        overlap by nudging blocking objects to a computed free pixel on the desk when not in stacking
+        mode, then publishing a two-pose <code>PoseArray</code> on <code>/pick_place_pair</code>.
+        <strong>Actuation:</strong> The pick and place node chains IK solutions with seeded continuity,
+        sends time-parameterized trajectories to the UR controller, toggles a binary gripper service,
+        and returns to a known observation configuration before the next capture.
       </p>
-    </section>
+    </div>
+  </section>
 
-    <section id="design">
-      <h2>2. Design</h2>
 
-      <figure class="figure">
-        <img src="assets/tidyer-concept-workflow.png" alt="Concept diagram: desired state, current state, robot arm, and outcome" width="1100" height="619" />
-        <figcaption>Reference-conditioned tidying at a glance: desired layout, live clutter, UR7e actuator, and the aligned outcome.</figcaption>
+  <!-- ===== 2. DESIGN ===== -->
+  <section class="section hero is-light" id="design">
+    <div class="container is-max-desktop section-report">
+      <h2 class="title is-3">2. Design</h2>
+
+      <figure>
+        <img src="assets/tidyer-concept-workflow.png"
+             alt="Concept diagram: desired state, current state, robot arm, and outcome" />
+        <figcaption>Reference-conditioned tidying at a glance: desired layout, live clutter, UR7e
+        actuator, and the aligned outcome.</figcaption>
       </figure>
 
       <h3>(a) Design criteria</h3>
@@ -73,20 +372,34 @@
 
       <h3>(b) Architecture</h3>
       <p>
-        <code>launch/tidyer_bringup.launch.py</code> brings up RealSense (RGB, aligned depth, point cloud), the <code>process_pointcloud</code> perception executable, <code>tidyer_tf</code> for the wrist-to-camera static transform, <code>tidyer_pick_place</code> for manipulation, and UR MoveIt. Because the keyboard listener needs an interactive TTY, it is started manually (<code>ros2 run tidyer tidyer_keyboard</code>) alongside the launch file, mirroring how other teams separate operator input from long-running nodes.
+        <code>launch/tidyer_bringup.launch.py</code> brings up RealSense (RGB, aligned depth, point
+        cloud), the <code>process_pointcloud</code> perception executable, <code>tidyer_tf</code> for
+        the wrist-to-camera static transform, <code>tidyer_pick_place</code> for manipulation, and UR
+        MoveIt. Because the keyboard listener needs an interactive TTY, it is started manually
+        (<code>ros2 run tidyer tidyer_keyboard</code>) alongside the launch file, mirroring how other
+        teams separate operator input from long-running nodes.
       </p>
-      <figure class="figure">
-        <img src="assets/architecture-overview.png" alt="Architecture diagram: RealSense input, OpenCV perception, MoveIt planning, UR7e execution" width="1200" height="675" />
-        <figcaption>High-level pipeline: RGB-D input, perception and segmentation, inverse kinematics and motion planning, and UR7e execution with parallel gripper.</figcaption>
+
+      <figure>
+        <img src="assets/architecture-overview.png"
+             alt="Architecture diagram: RealSense input, OpenCV perception, MoveIt planning, UR7e execution" />
+        <figcaption>High-level pipeline: RGB-D input, perception and segmentation, inverse kinematics
+        and motion planning, and UR7e execution with parallel gripper.</figcaption>
       </figure>
 
       <h3>(c) Planning and control</h3>
       <p>
-        Each tidy cycle follows the same staged motion contract: the arm returns to a repeatable observation configuration, perception acquires an aligned depth frame, goals are computed, then the executor runs an approach, grasp, lift, place, retract, and home sequence before the operator (or auto-chain) triggers the next capture.
+        Each tidy cycle follows the same staged motion contract: the arm returns to a repeatable
+        observation configuration, perception acquires an aligned depth frame, goals are computed, then
+        the executor runs an approach, grasp, lift, place, retract, and home sequence before the
+        operator (or auto-chain) triggers the next capture.
       </p>
-      <figure class="figure">
-        <img src="assets/planning-control-sequence.png" alt="Execution sequence per cycle: observation, capture, compute pick place, pre-grasp, grasp, lift, place, retract, return" width="1200" height="900" />
-        <figcaption>Execution sequence per cycle: observation pose through grasp, place, and return to the observation pose for the next comparison.</figcaption>
+
+      <figure>
+        <img src="assets/planning-control-sequence.png"
+             alt="Execution sequence per cycle: observation, capture, compute pick place, pre-grasp, grasp, lift, place, retract, return" />
+        <figcaption>Execution sequence per cycle: observation pose through grasp, place, and return to
+        the observation pose for the next comparison.</figcaption>
       </figure>
 
       <h3>(d) Key engineering trade-offs</h3>
@@ -97,58 +410,105 @@
         <li><strong>MoveIt at 0.3 velocity scaling</strong> favors safe execution over minimum cycle time. That is important when perception noise remains on the order of millimeters to centimeters.</li>
       </ul>
 
-      <div class="callout">
-        <strong>Move ordering in code.</strong> An early write-up sketched richer priority rules combining displacement, area, and neighborhood structure. The implementation in <code>_find_moved_objects</code> pairs each reference detection to the nearest same-label, same-shape contour in the current image (pixel space), then sorts remaining “moved” pairs by <strong>descending contour area</strong> so the largest mismatch is handled first. Temporary relocations for overlap use a distance-transform free spot biased toward minimal motion from the blocking object’s centroid (<code>_find_free_spot</code>).
+      <div class="notification is-info is-light" style="margin:1.5rem 0;">
+        <strong>Move ordering in code.</strong> An early write-up sketched richer priority rules
+        combining displacement, area, and neighborhood structure. The implementation in
+        <code>_find_moved_objects</code> pairs each reference detection to the nearest same-label,
+        same-shape contour in the current image (pixel space), then sorts remaining "moved" pairs by
+        <strong>descending contour area</strong> so the largest mismatch is handled first. Temporary
+        relocations for overlap use a distance-transform free spot biased toward minimal motion from the
+        blocking object's centroid (<code>_find_free_spot</code>).
       </div>
 
       <h3>(e) Robustness</h3>
       <p>
-        PCA yaw is suppressed for nearly symmetric eigenvalue ratios so the gripper does not hunt unstable headings; IK calls are seed-chained across waypoints in <code>pair_callback</code> to reduce wrist flips. These choices mirror standard practice for tabletop cells: prefer explainable failure modes over opaque end-to-end policies when course timelines are tight.
+        PCA yaw is suppressed for nearly symmetric eigenvalue ratios so the gripper does not hunt
+        unstable headings; IK calls are seed-chained across waypoints in <code>pair_callback</code> to
+        reduce wrist flips. These choices mirror standard practice for tabletop cells: prefer explainable
+        failure modes over opaque end-to-end policies when course timelines are tight.
       </p>
-    </section>
+    </div>
+  </section>
 
-    <section id="implementation">
-      <h2>3. Implementation</h2>
+
+  <!-- ===== 3. IMPLEMENTATION ===== -->
+  <section class="section" id="implementation">
+    <div class="container is-max-desktop section-report">
+      <h2 class="title is-3">3. Implementation</h2>
 
       <h3>(a) Hardware</h3>
-      <figure class="figure">
-        <img src="assets/hardware-workcell.png" alt="UR collaborative arm with parallel gripper over a wooden workbench with colored blocks in the EECS 106 lab" width="1200" height="900" />
+      <figure>
+        <img src="assets/hardware-workcell.png"
+             alt="UR collaborative arm with parallel gripper over a wooden workbench with colored blocks in the EECS 106 lab" />
         <figcaption>Lab workcell: UR arm with parallel gripper, wrist-mounted sensing, and colored blocks on the workspace.</figcaption>
       </figure>
       <p>
-        <strong>Bill of materials (lab stack):</strong> one UR7e with parallel gripper, one Intel RealSense D435-class RGB-D camera, assorted standardized colored blocks for repeatable tests, and the department robot desk. Justification for RealSense over a pure RGB webcam matches our proposal: aligned depth is required to lift segmented regions into 3D for grasp and placement without a separate structured-light rig.
+        <strong>Bill of materials (lab stack):</strong> one UR7e with parallel gripper, one Intel
+        RealSense D435-class RGB-D camera, assorted standardized colored blocks for repeatable tests,
+        and the department robot desk. Justification for RealSense over a pure RGB webcam matches our
+        proposal: aligned depth is required to lift segmented regions into 3D for grasp and placement
+        without a separate structured-light rig.
       </p>
 
       <h3>(b) ROS graph and packages</h3>
       <p>
-        Declared runtime dependencies in <code>package.xml</code> include <code>rclpy</code>, <code>sensor_msgs</code>, <code>geometry_msgs</code>, <code>cv_bridge</code>, <code>moveit_msgs</code>, <code>tf2_ros</code>, <code>realsense2_camera</code>, <code>ur_moveit_config</code>, and the launch stack. The perception node additionally uses <code>std_srvs/Trigger</code> services and publishes <code>geometry_msgs/PoseArray</code> goals consumed by the executor.
+        Declared runtime dependencies in <code>package.xml</code> include <code>rclpy</code>,
+        <code>sensor_msgs</code>, <code>geometry_msgs</code>, <code>cv_bridge</code>,
+        <code>moveit_msgs</code>, <code>tf2_ros</code>, <code>realsense2_camera</code>,
+        <code>ur_moveit_config</code>, and the launch stack. The perception node additionally uses
+        <code>std_srvs/Trigger</code> services and publishes <code>geometry_msgs/PoseArray</code> goals
+        consumed by the executor.
       </p>
 
       <h3>(c) Perception pipeline (<code>process_pointcloud.py</code>)</h3>
       <ol>
         <li>Subscribe to RGB, aligned depth, and <code>CameraInfo</code>; cache intrinsics <code>fx, fy, cx, cy</code>.</li>
         <li>On <code>/capture_reference</code>, segment the reference frame and store detections plus the RGB snapshot.</li>
-        <li>On <code>/capture_current</code>, segment the live frame, match to reference by label and shape, and mark a block “moved” if centroid distance exceeds <code>position_tolerance_px</code> (default 50&nbsp;px) or yaw differs beyond <code>yaw_tolerance_rad</code> (≈10°) for non-symmetric shapes.</li>
+        <li>On <code>/capture_current</code>, segment the live frame, match to reference by label and shape, and mark a block "moved" if centroid distance exceeds <code>position_tolerance_px</code> (default 50&nbsp;px) or yaw differs beyond <code>yaw_tolerance_rad</code> (&asymp;10&deg;) for non-symmetric shapes.</li>
         <li>For each contour, apply morphology, find contours, take bbox-centered pixels as robust 2D anchors, back-project valid depth through the pinhole model, optionally fit a dominant plane with RANSAC for top height, and estimate grasp yaw via 3D PCA transformed into <code>base_link</code>.</li>
         <li>If the reference place footprint intersects another object (2D mask test, dilated by <code>overlap_margin_px</code>) and stacking mode is off, publish a displacement pick and place for the blocking object to a legal desk pixel; otherwise publish the intended tidy move.</li>
         <li>Publish two poses (pick, place) in <code>base_link</code> on <code>/pick_place_pair</code>; write debug imagery and JSON metadata under <code>~/final_proj/pair/</code> for post-run inspection.</li>
       </ol>
+
       <p>
-        <strong>Swap conflict resolution (free space on the desk).</strong> When the reference place footprint intersects another block in the current image, <code>_occupiers_at_place_contour</code> rasterizes the reference place contour into a binary mask, optionally dilates it by <code>overlap_margin_px</code> to absorb placement jitter, and tests intersection with each other detection’s filled contour. The largest occupier is chosen for a <strong>displacement</strong> move. <code>_find_free_spot</code> then paints an <strong>occupancy mask</strong> from every current detection’s contour, dilates it using <code>free_spot_margin_px</code>, intersects with a <strong>desk-only mask</strong> derived from depth near the stored desk plane, and runs a <strong>distance transform</strong> on the complement to find pixels where a circle of radius roughly half the displaced block’s bounding diagonal (plus margin) still fits. Among qualifying pixels it picks the one <strong>closest in image space</strong> to the occupier’s centroid so the block is nudged minimally onto clear wood before the original pick and place can proceed on a later <code>/capture_current</code> call.
+        <strong>Swap conflict resolution (free space on the desk).</strong> When the reference place
+        footprint intersects another block in the current image,
+        <code>_occupiers_at_place_contour</code> rasterizes the reference place contour into a binary
+        mask, optionally dilates it by <code>overlap_margin_px</code> to absorb placement jitter, and
+        tests intersection with each other detection's filled contour. The largest occupier is chosen for
+        a <strong>displacement</strong> move. <code>_find_free_spot</code> then paints an
+        <strong>occupancy mask</strong> from every current detection's contour, dilates it using
+        <code>free_spot_margin_px</code>, intersects with a <strong>desk-only mask</strong> derived from
+        depth near the stored desk plane, and runs a <strong>distance transform</strong> on the
+        complement to find pixels where a circle of radius roughly half the displaced block's bounding
+        diagonal (plus margin) still fits. Among qualifying pixels it picks the one
+        <strong>closest in image space</strong> to the occupier's centroid so the block is nudged
+        minimally onto clear wood before the original pick and place can proceed on a later
+        <code>/capture_current</code> call.
       </p>
-      <figure class="figure">
-        <img src="assets/perception-detections.png" alt="OpenCV detection overlay: color labels, contours, bounding boxes, and centroids on desk blocks" width="1200" height="900" />
-        <figcaption>Live perception output: HSV-driven masks with contour outlines, axis-aligned bounding boxes, centroid markers, and per-block <code>label:shape</code> annotations (OpenCV debug windows during integration).</figcaption>
+
+      <figure>
+        <img src="assets/perception-detections.png"
+             alt="OpenCV detection overlay: color labels, contours, bounding boxes, and centroids on desk blocks" />
+        <figcaption>Live perception output: HSV-driven masks with contour outlines, axis-aligned
+        bounding boxes, centroid markers, and per-block <code>label:shape</code> annotations
+        (OpenCV debug windows during integration).</figcaption>
       </figure>
 
       <h3>(d) Execution pipeline (<code>main.py</code>, <code>ik.py</code>)</h3>
       <p>
-        The executor subscribes to <code>/pick_place_pair</code>, lifts waypoints for approach and finger insertion offsets, solves IK through MoveIt’s <code>/compute_ik</code>, plans between joint goals with <code>RRTConnectkConfigDefault</code> via <code>/plan_kinematic_path</code>, sends trajectories to <code>/scaled_joint_trajectory_controller/follow_joint_trajectory</code>, and toggles <code>/toggle_gripper</code> at the appropriate queue points. After a cycle it returns to <code>DEFAULT_JOINTS</code> and can optionally trigger another <code>/capture_current</code> when the auto-capture chain is armed, closing the outer tidy loop without a VLM in the middle.
+        The executor subscribes to <code>/pick_place_pair</code>, lifts waypoints for approach and
+        finger insertion offsets, solves IK through MoveIt's <code>/compute_ik</code>, plans between
+        joint goals with <code>RRTConnectkConfigDefault</code> via <code>/plan_kinematic_path</code>,
+        sends trajectories to
+        <code>/scaled_joint_trajectory_controller/follow_joint_trajectory</code>, and toggles
+        <code>/toggle_gripper</code> at the appropriate queue points. After a cycle it returns to
+        <code>DEFAULT_JOINTS</code> and can optionally trigger another <code>/capture_current</code>
+        when the auto-capture chain is armed, closing the outer tidy loop without a VLM in the middle.
       </p>
 
       <h3>(e) Operator workflow and terminals</h3>
-      <pre class="flow">
-Terminal A (interactive):
+      <pre>Terminal A (interactive):
   ros2 run tidyer tidyer_keyboard
 
 Terminal B:
@@ -167,99 +527,178 @@ Desk workflow (keyboard):
            → press s  (/toggle_stacking) when building vertical structures
 
 Optional speed scaling (example):
-  ros2 service call /io_and_status_controller/set_speed_slider ur_msgs/srv/SetSpeedSliderFraction "{speed_slider_fraction: 0.35}"
-      </pre>
+  ros2 service call /io_and_status_controller/set_speed_slider \
+    ur_msgs/srv/SetSpeedSliderFraction "{speed_slider_fraction: 0.35}"</pre>
+
       <p>
-        TF from <code>wrist_3_link</code> to <code>camera_color_optical_frame</code> is broadcast from <code>static_tf_transform.py</code>; if this transform or the robot driver tree is misconfigured, <code>/capture_current</code> returns a clear <code>TransformException</code> message (the same failure mode we saw when <code>base_link</code> and the optical frame were not connected).
+        TF from <code>wrist_3_link</code> to <code>camera_color_optical_frame</code> is broadcast from
+        <code>static_tf_transform.py</code>; if this transform or the robot driver tree is
+        misconfigured, <code>/capture_current</code> returns a clear <code>TransformException</code>
+        message (the same failure mode we saw when <code>base_link</code> and the optical frame were not
+        connected).
       </p>
 
       <h3>(f) Repository layout (selected)</h3>
       <ul>
-        <li><code>tidyer/perception/process_pointcloud.py</code>: perception, services, overlap logic, publisher.</li>
-        <li><code>tidyer/planning/main.py</code>: pick and place executor, job queue, auto-capture chain.</li>
-        <li><code>tidyer/planning/ik.py</code>: MoveIt IK and joint-space planning helpers.</li>
-        <li><code>tidyer/planning/static_tf_transform.py</code>: camera extrinsic from wrist.</li>
-        <li><code>tidyer/planning/keyboard_trigger.py</code>: operator-facing triggers.</li>
-        <li><code>launch/tidyer_bringup.launch.py</code>: integrated bring-up.</li>
+        <li><code>tidyer/perception/process_pointcloud.py</code> &mdash; perception, services, overlap logic, publisher.</li>
+        <li><code>tidyer/planning/main.py</code> &mdash; pick and place executor, job queue, auto-capture chain.</li>
+        <li><code>tidyer/planning/ik.py</code> &mdash; MoveIt IK and joint-space planning helpers.</li>
+        <li><code>tidyer/planning/static_tf_transform.py</code> &mdash; camera extrinsic from wrist.</li>
+        <li><code>tidyer/planning/keyboard_trigger.py</code> &mdash; operator-facing triggers.</li>
+        <li><code>launch/tidyer_bringup.launch.py</code> &mdash; integrated bring-up.</li>
       </ul>
-    </section>
+    </div>
+  </section>
 
-    <section id="results">
-      <h2>4. Results</h2>
+
+  <!-- ===== 4. RESULTS ===== -->
+  <section class="section hero is-light" id="results">
+    <div class="container is-max-desktop section-report">
+      <h2 class="title is-3">4. Results</h2>
 
       <h3>(a) Qualitative results</h3>
       <p>
-        We demonstrated in-plane translation and rotation corrections, multi-block swapping with temporary freespace when goals collide, color-driven organization, deliberate “art” layouts, recovery after disturbances, and multi-layer assemblies when stacking mode is enabled. Each behavior exercises the same core loop (segment, diff against reference, plan one interaction, re-image) rather than a bespoke controller per scenario.
+        We demonstrated in-plane translation and rotation corrections, multi-block swapping with
+        temporary freespace when goals collide, color-driven organization, deliberate "art" layouts,
+        recovery after disturbances, and multi-layer assemblies when stacking mode is enabled. Each
+        behavior exercises the same core loop (segment, diff against reference, plan one interaction,
+        re-image) rather than a bespoke controller per scenario.
       </p>
 
-      <figure class="figure">
-        <img src="assets/results-random-vs-tidy.png" alt="Random block configuration compared to Tidyer one-shot result on the tabletop" width="1200" height="675" />
-        <figcaption>Random initial configuration (left) and the layout after a one-shot tidy run (right), showing multi-object rearrangement on the wooden workspace.</figcaption>
+      <figure>
+        <img src="assets/results-random-vs-tidy.png"
+             alt="Random block configuration compared to Tidyer one-shot result on the tabletop" />
+        <figcaption>Random initial configuration (left) and the layout after a one-shot tidy run
+        (right), showing multi-object rearrangement on the wooden workspace.</figcaption>
       </figure>
 
-      <figure class="figure">
-        <img src="assets/results-stacking-target-layers.png" alt="Target stacking configuration shown as layer 1 flat layout, layer 2 partial stacks, layer 3 taller stacks" width="1200" height="900" />
-        <figcaption>Reference-driven stacking: target configurations for layer 1 (flat), layer 2 (partial stacks), and layer 3 (taller assemblies) used when building vertical structures with stacking mode.</figcaption>
+      <figure>
+        <img src="assets/results-stacking-target-layers.png"
+             alt="Target stacking configuration shown as layer 1 flat layout, layer 2 partial stacks, layer 3 taller stacks" />
+        <figcaption>Reference-driven stacking: target configurations for layer 1 (flat), layer 2
+        (partial stacks), and layer 3 (taller assemblies) used when building vertical structures with
+        stacking mode.</figcaption>
       </figure>
 
       <h3>(b) 3D implementation</h3>
       <p>
-        We do not run a full volumetric planner over explicit 3D voxel maps. Instead, <strong>vertical structure is handled as a sequence of mostly 2D problems</strong>: each stage still compares segmented blobs in the image to a saved reference, publishes one pick and one place pose per cycle, and relies on depth only where it already mattered for the tabletop case (intrinsics back-projection, RANSAC block-top height, desk-plane band masking in <code>_segment_objects</code> via <code>_compute_desk_block_mask</code>).
+        We do not run a full volumetric planner over explicit 3D voxel maps. Instead,
+        <strong>vertical structure is handled as a sequence of mostly 2D problems</strong>: each stage
+        still compares segmented blobs in the image to a saved reference, publishes one pick and one
+        place pose per cycle, and relies on depth only where it already mattered for the tabletop case
+        (intrinsics back-projection, RANSAC block-top height, desk-plane band masking in
+        <code>_segment_objects</code> via <code>_compute_desk_block_mask</code>).
       </p>
       <p>
-        <strong>Stacking vs. swapping.</strong> In the default (swap) path, if the reference footprint for a place overlaps another live block in the image, perception issues a <strong>temporary displacement</strong> pick and place so the table clears before the intended move (<code>_occupiers_at_place_contour</code>, <code>_find_free_spot</code> in <code>process_pointcloud.py</code>). For <strong>3D stacks</strong>, the operator toggles <strong>stacking mode</strong> with the <code>s</code> key, which calls <code>/toggle_stacking</code>: while stacking is on, that overlap check is skipped so the goal contour is allowed to sit on top of an existing supporter, which is how we reuse the same 2D correspondence machinery for layered builds.
+        <strong>Stacking vs. swapping.</strong> In the default (swap) path, if the reference footprint
+        for a place overlaps another live block in the image, perception issues a
+        <strong>temporary displacement</strong> pick and place so the table clears before the intended
+        move (<code>_occupiers_at_place_contour</code>, <code>_find_free_spot</code> in
+        <code>process_pointcloud.py</code>). For <strong>3D stacks</strong>, the operator toggles
+        <strong>stacking mode</strong> with the <code>s</code> key, which calls
+        <code>/toggle_stacking</code>: while stacking is on, that overlap check is skipped so the goal
+        contour is allowed to sit on top of an existing supporter, which is how we reuse the same 2D
+        correspondence machinery for layered builds.
       </p>
       <p>
-        <strong>Depth as a layer discriminator.</strong> Parameter <code>place_occupied_depth_thresh_m</code> (default 0.02&nbsp;m) is tuned tighter than a full block height so a block resting one layer higher (closer to the camera along the optical ray) does not get mistaken for the same layer as the reference top when deciding whether something still needs to move. Together with <code>block_height_min_m</code> and <code>block_height_max_m</code>, this keeps segmentation focused on the current physical slab near the desk plane while still letting the arm place onto raised supports when stacking mode allows overlaps.
+        <strong>Depth as a layer discriminator.</strong> Parameter
+        <code>place_occupied_depth_thresh_m</code> (default 0.02&nbsp;m) is tuned tighter than a full
+        block height so a block resting one layer higher (closer to the camera along the optical ray)
+        does not get mistaken for the same layer as the reference top when deciding whether something
+        still needs to move. Together with <code>block_height_min_m</code> and
+        <code>block_height_max_m</code>, this keeps segmentation focused on the current physical slab
+        near the desk plane while still letting the arm place onto raised supports when stacking mode
+        allows overlaps.
       </p>
       <p>
-        <strong>Operator loop for layers.</strong> Practically, “layer 3” in the lab is <strong>another reference snapshot</strong> taken after lower layers match the previous reference: capture a flat reference, run <code>c</code> until aligned, place a new physical arrangement or add height, capture a new reference for the next tier, repeat. The executor in <code>main.py</code> does not change; each cycle is still one <code>PoseArray</code> pair in <code>base_link</code>. Teammates can extend this subsection with concrete layer counts, failure cases, and tuning notes from your runs.
+        <strong>Operator loop for layers.</strong> Practically, "layer 3" in the lab is
+        <strong>another reference snapshot</strong> taken after lower layers match the previous
+        reference: capture a flat reference, run <code>c</code> until aligned, place a new physical
+        arrangement or add height, capture a new reference for the next tier, repeat. The executor in
+        <code>main.py</code> does not change; each cycle is still one <code>PoseArray</code> pair in
+        <code>base_link</code>.
       </p>
-      <p class="placeholder-block"><em>[Teammates: add extra figures, timings, and parameter sweeps for stacking here.]</em></p>
 
       <h3>(c) Additional challenges (team notes)</h3>
-      <p class="placeholder-block"><em>[Teammates: add integration stories, failed trials, mitigations, or open issues here.]</em></p>
+      <p class="has-text-grey-light"><em>[Teammates: add integration stories, failed trials, mitigations, or open issues here.]</em></p>
 
       <h3>(d) Video highlights</h3>
-      <p>Short clips from integration testing (update embeds if URLs change).</p>
-      <div class="video-scroll-container">
-        <div class="video-card">
-          <strong>Ex. 1: Rotation and translation</strong>
-          <iframe src="https://www.youtube.com/embed/VIDOaxYbeyc" title="Ex. 1: Rotation and translation" allowfullscreen></iframe>
-        </div>
-        <div class="video-card">
-          <strong>Ex. 2: 3-way swap</strong>
-          <iframe src="https://www.youtube.com/embed/bH_0JVcUyO4" title="3-way swap" allowfullscreen></iframe>
-        </div>
-        <div class="video-card">
-          <strong>Ex. 3: Tidy messy desk (color organization)</strong>
-          <iframe src="https://www.youtube.com/embed/zai4vFa6mLs" title="Tidy messy desk (color organization)" allowfullscreen></iframe>
-        </div>
-        <div class="video-card">
-          <strong>Ex. 4: Smiley face (art)</strong>
-          <iframe src="https://www.youtube.com/embed/6RR9ewO2S4c" title="Smiley face art" allowfullscreen></iframe>
-        </div>
-        <div class="video-card">
-          <strong>Ex. 5: Self-correction</strong>
-          <iframe src="https://www.youtube.com/embed/5GZHWxp8JhA" title="Ex. 5: Self-correction" allowfullscreen></iframe>
-        </div>
-        <div class="video-card">
-          <strong>Ex. 6: 3D structures (chairs)</strong>
-          <iframe src="https://www.youtube.com/embed/Dvf_cgNil_o" title="Ex. 6: 3D structures (chairs)" allowfullscreen></iframe>
-        </div>
-        <div class="video-card">
-          <strong>Ex. 7: 3D structures (staircase)</strong>
-          <iframe src="https://www.youtube.com/embed/PqTq7uPuEPc" title="Ex. 7: 3D structures (staircase)" allowfullscreen></iframe>
-        </div>
-      </div>
-    </section>
+      <p>Short clips from integration testing.</p>
+      <div class="columns is-multiline">
 
-    <section id="conclusion">
-      <h2>5. Conclusion</h2>
+        <div class="column is-half">
+          <p style="font-weight:600;margin-bottom:0.5rem;text-align:center">Ex. 1: Rotation and translation</p>
+          <div class="publication-video">
+            <iframe src="https://www.youtube.com/embed/VIDOaxYbeyc"
+                    frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+          </div>
+        </div>
+
+        <div class="column is-half">
+          <p style="font-weight:600;margin-bottom:0.5rem;text-align:center">Ex. 2: 3-way swap</p>
+          <div class="publication-video">
+            <iframe src="https://www.youtube.com/embed/bH_0JVcUyO4"
+                    frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+          </div>
+        </div>
+
+        <div class="column is-half">
+          <p style="font-weight:600;margin-bottom:0.5rem;text-align:center">Ex. 3: Tidy messy desk (color organization)</p>
+          <div class="publication-video">
+            <iframe src="https://www.youtube.com/embed/zai4vFa6mLs"
+                    frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+          </div>
+        </div>
+
+        <div class="column is-half">
+          <p style="font-weight:600;margin-bottom:0.5rem;text-align:center">Ex. 4: Smiley face (art)</p>
+          <div class="publication-video">
+            <iframe src="https://www.youtube.com/embed/6RR9ewO2S4c"
+                    frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+          </div>
+        </div>
+
+        <div class="column is-half">
+          <p style="font-weight:600;margin-bottom:0.5rem;text-align:center">Ex. 5: Self-correction</p>
+          <div class="publication-video">
+            <iframe src="https://www.youtube.com/embed/5GZHWxp8JhA"
+                    frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+          </div>
+        </div>
+
+        <div class="column is-half">
+          <p style="font-weight:600;margin-bottom:0.5rem;text-align:center">Ex. 6: 3D structures (chairs)</p>
+          <div class="publication-video">
+            <iframe src="https://www.youtube.com/embed/Dvf_cgNil_o"
+                    frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+          </div>
+        </div>
+
+        <div class="column is-half">
+          <p style="font-weight:600;margin-bottom:0.5rem;text-align:center">Ex. 7: 3D structures (staircase)</p>
+          <div class="publication-video">
+            <iframe src="https://www.youtube.com/embed/PqTq7uPuEPc"
+                    frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ===== 5. CONCLUSION ===== -->
+  <section class="section" id="conclusion">
+    <div class="container is-max-desktop section-report">
+      <h2 class="title is-3">5. Conclusion</h2>
 
       <h3>(a) Outcomes vs. criteria</h3>
       <p>
-        The delivered system meets the core criteria in §2a: reference capture, live differencing, overlap-aware sequencing, MoveIt-backed execution, and optional stacking. What remains open is hard robustness: lighting swings, highly reflective blocks, and aggressive speed settings still show up as protective stops or IK aborts, which is consistent with the difficulty called out in our proposal.
+        The delivered system meets the core criteria in &sect;2a: reference capture, live differencing,
+        overlap-aware sequencing, MoveIt-backed execution, and optional stacking. What remains open is
+        hard robustness: lighting swings, highly reflective blocks, and aggressive speed settings still
+        show up as protective stops or IK aborts, which is consistent with the difficulty called out in
+        our proposal.
       </p>
 
       <h3>(b) Challenges encountered</h3>
@@ -273,61 +712,114 @@ Optional speed scaling (example):
 
       <h3>(c) Future work</h3>
       <p>
-        Natural extensions include stronger segmentation (e.g., SAM-class models) with careful latency budgeting, richer collision reasoning than single-step overlap masks, learned or search-based grasp orientation for heterogeneous objects, and optional language interfaces layered <em>above</em> the existing reference image contract. Those directions preserve the modular boundary where our team spent most of the debugging budget: the line between “what moved?” and “how should the arm move?”.
+        Natural extensions include stronger segmentation (e.g., SAM-class models) with careful latency
+        budgeting, richer collision reasoning than single-step overlap masks, learned or search-based
+        grasp orientation for heterogeneous objects, and optional language interfaces layered
+        <em>above</em> the existing reference image contract. Those directions preserve the modular
+        boundary where our team spent most of the debugging budget: the line between "what moved?" and
+        "how should the arm move?".
       </p>
-    </section>
+    </div>
+  </section>
 
-    <section id="team">
-      <h2>6. Team</h2>
-      <div class="team-grid">
-        <article class="card">
-          <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
-          <h4>Tvisha Londhe</h4>
-          <p class="role"><a href="mailto:tvisha.londhe@berkeley.edu">tvisha.londhe@berkeley.edu</a></p>
-          <p>Tvisha is pursuing her undergraduate degree in EECS and is interested in machine learning and learning-based architectures, particularly in how they can be applied to problems in computer vision and robotics.</p>
-        </article>
-        <article class="card">
-          <img src="assets/placeholder.svg" alt="" class="headshot" width="100" height="100" />
-          <h4>Kenneth Llontop</h4>
-          <p class="role"><a href="mailto:kennethllontop@berkeley.edu">kennethllontop@berkeley.edu</a></p>
-          <p>Kenneth is pursuing his undergraduate degree in EECS and is interested in leveraging machine learning and robotics to improve social welfare.</p>
-        </article>
-        <article class="card">
-          <img src="assets/headshot-shivanshi-tandon.png" alt="" class="headshot" width="100" height="100" />
-          <h4>Shivanshi Tandon</h4>
-          <p class="role"><a href="mailto:shivanshitandon@berkeley.edu">shivanshitandon@berkeley.edu</a></p>
-          <p>Shivanshi is pursuing her undergraduate degree in EECS and Business and is interested in intersecting software with her first-time experience in robotics to broaden solution capabilities.</p>
-        </article>
-        <article class="card">
-          <img src="assets/headshot-sarika-pasumarthy.png" alt="Sarika Pasumarthy" class="headshot" width="100" height="100" />
-          <h4>Sarika Pasumarthy</h4>
-          <p class="role"><a href="mailto:sarikapasumarthy@berkeley.edu">sarikapasumarthy@berkeley.edu</a></p>
-          <p>Sarika is pursuing undergraduate degrees in Computer Science and Business Administration and is interested in AI/ML for social good and in solving interesting problems through combined hardware and software systems.</p>
-        </article>
+
+  <!-- ===== 6. TEAM ===== -->
+  <section class="section hero is-light" id="team">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3">6. Team</h2>
+      <div class="columns is-multiline">
+
+        <div class="column is-half">
+          <div class="team-card">
+            <img src="assets/placeholder.svg" alt="Tvisha Londhe" />
+            <h4>Tvisha Londhe</h4>
+            <p class="role"><a href="mailto:tvisha.londhe@berkeley.edu">tvisha.londhe@berkeley.edu</a></p>
+            <p>Tvisha is pursuing her undergraduate degree in EECS and is interested in machine learning
+            and learning-based architectures, particularly in how they can be applied to problems in
+            computer vision and robotics.</p>
+          </div>
+        </div>
+
+        <div class="column is-half">
+          <div class="team-card">
+            <img src="assets/placeholder.svg" alt="Kenneth Llontop" />
+            <h4>Kenneth Llontop</h4>
+            <p class="role"><a href="mailto:kennethllontop@berkeley.edu">kennethllontop@berkeley.edu</a></p>
+            <p>Kenneth is pursuing his undergraduate degree in EECS and is interested in leveraging
+            machine learning and robotics to improve social welfare.</p>
+          </div>
+        </div>
+
+        <div class="column is-half">
+          <div class="team-card">
+            <img src="assets/headshot-shivanshi-tandon.png" alt="Shivanshi Tandon" />
+            <h4>Shivanshi Tandon</h4>
+            <p class="role"><a href="mailto:shivanshitandon@berkeley.edu">shivanshitandon@berkeley.edu</a></p>
+            <p>Shivanshi is pursuing her undergraduate degree in EECS and Business and is interested in
+            intersecting software with her first-time experience in robotics to broaden solution
+            capabilities.</p>
+          </div>
+        </div>
+
+        <div class="column is-half">
+          <div class="team-card">
+            <img src="assets/headshot-sarika-pasumarthy.png" alt="Sarika Pasumarthy" />
+            <h4>Sarika Pasumarthy</h4>
+            <p class="role"><a href="mailto:sarikapasumarthy@berkeley.edu">sarikapasumarthy@berkeley.edu</a></p>
+            <p>Sarika is pursuing undergraduate degrees in Computer Science and Business Administration
+            and is interested in AI/ML for social good and in solving interesting problems through
+            combined hardware and software systems.</p>
+          </div>
+        </div>
+
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section id="extra">
-      <h2>7. Additional materials</h2>
+
+  <!-- ===== 7. ADDITIONAL MATERIALS ===== -->
+  <section class="section" id="extra">
+    <div class="container is-max-desktop section-report">
+      <h2 class="title is-3">7. Additional Materials</h2>
       <ul>
-        <li><a href="https://github.com/shivanshitandon/tidyer">GitHub repository</a>: source, <code>package.xml</code>, <code>setup.py</code> entry points, and launch files.</li>
+        <li><a href="https://github.com/shivanshitandon/tidyer" target="_blank">GitHub repository</a>: source, <code>package.xml</code>, <code>setup.py</code> entry points, and launch files.</li>
         <li><strong>Branch note:</strong> integrated demos and this site track the <code>demo</code> branch; align <code>main</code> if your course submission requires a single default branch.</li>
         <li>CAD for custom mounts, vendor URDF versions, and component datasheets: add links as you publish them.</li>
       </ul>
 
       <h3>References</h3>
-      <p style="font-size:0.92rem;color:var(--muted);">
-        A. Goldberg, K. Kondap, T. Qiu, Z. Ma, L. Fu, J. Kerr, H. Huang, K. Chen, K. Fang, and K. Goldberg,
-        “Blox-Net: Generative Design-for-Robot-Assembly Using VLM Supervision, Physics Simulation, and a Robot with Reset,”
-        arXiv:2409.17126, 2024.
-        <a href="https://arxiv.org/abs/2409.17126">https://arxiv.org/abs/2409.17126</a>
-        (PDF: <a href="https://arxiv.org/pdf/2409.17126">https://arxiv.org/pdf/2409.17126</a>).
+      <p style="font-size:0.92rem;color:#64748b;">
+        A. Goldberg, K. Kondap, T. Qiu, Z. Ma, L. Fu, J. Kerr, H. Huang, K. Chen, K. Fang, and
+        K. Goldberg, "Blox-Net: Generative Design-for-Robot-Assembly Using VLM Supervision, Physics
+        Simulation, and a Robot with Reset," arXiv:2409.17126, 2024.
+        <a href="https://arxiv.org/abs/2409.17126" target="_blank">https://arxiv.org/abs/2409.17126</a>
       </p>
-    </section>
+    </div>
+  </section>
+
   </main>
 
-  <footer class="site">
-    EECS 106A · Group 17 · Tidyer · GitHub Pages from <code>/docs</code>
+  <footer class="footer">
+    <div class="container">
+      <div class="columns is-centered">
+        <div class="column is-8">
+          <div class="content has-text-centered">
+            <p>
+              EECS 106A &middot; Group 17 &middot; Tidyer &middot; Spring 2026 &middot;
+              <a href="https://github.com/shivanshitandon/tidyer" target="_blank">GitHub</a>
+            </p>
+            <p>
+              This page was built using the
+              <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">
+                Academic Project Page Template
+              </a>, adopted from the
+              <a href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   </footer>
+
 </body>
 </html>
